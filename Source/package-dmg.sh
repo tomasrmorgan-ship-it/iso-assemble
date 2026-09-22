@@ -6,7 +6,14 @@ README_PATH="${3:?User read-me path required}"
 STAGING="$(mktemp -d -t isoassemble-dmg)"
 trap 'rm -rf "$STAGING"' EXIT
 ditto "$APP_DIR" "$STAGING/ISO Assemble.app"
-cp "$README_PATH" "$STAGING/Read Me.md"
+mkdir -p "$STAGING/Documentation"
+cp "$README_PATH" "$STAGING/Documentation/Read Me.md"
+TEXT_PATH="${README_PATH%.md}.txt"
+if [[ -f "$TEXT_PATH" ]]; then
+  cp "$TEXT_PATH" "$STAGING/Documentation/Read Me.txt"
+else
+  cp "$README_PATH" "$STAGING/Documentation/Read Me.txt"
+fi
 ln -s /Applications "$STAGING/Applications"
 hdiutil create -volname 'ISO Assemble 1.2' -srcfolder "$STAGING" -format UDZO -ov "$DMG_PATH"
 hdiutil verify "$DMG_PATH"

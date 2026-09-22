@@ -1,0 +1,45 @@
+ISO Assemble 1.2
+
+A standalone Apple Silicon Mac app for ATEM ISO recordings. No Codex, account, Python installation, Homebrew, or internet connection is needed to convert recordings. Python and ffprobe are bundled. Your editing application and original media must be installed/available locally.
+
+Install and use
+
+1. Open ISO Assemble 1.2 Apple Silicon.dmg and drag ISO Assemble.app to Applications.
+2. Open the app and choose the recording root, such as My Recording. The root must contain its ATEM text-based .drp, Video ISO Files, and any Audio Source Files.
+3. Choose an output folder and project name. Scanning is a dry run: it checks timing and media without creating an editor project.
+4. Select Resolve or Premiere and explicitly choose the primary audio source. All audio ISOs are retained; only the selected source plays. Choose ATEM stereo program mix for the original live mix when available.
+5. Create the project. Original media and ATEM files remain unchanged.
+
+Resolve: Tested with Studio 21.0.0.48. Enable local scripting in Resolve Preferences → System → General → External scripting using → Local. The app creates a separate project, exports a native .drp, reimports it into a deterministic verification project, checks it and returns to the edit. Other Resolve versions are rejected until validated. Verification projects are reused on safe reruns.
+
+Premiere: Tested with 26.2.2. Save your work and quit Premiere before Create. The app launches Premiere with the generated XML in a new project. After import, use File → Save As with the project name and results folder shown by ISO Assemble. The app then verifies the native .prproj automatically. Open the <project name>_Edit sequence to edit and enable the Multi-Camera view. The small manual Save As step remains: Premiere has no verified external save bridge in this plugin-free app. This is not completely unattended Premiere conversion.
+
+What transfers
+
+- Eight consistently named native multicam angles, live camera selections and integer drop-frame timing.
+- Recording gaps remain at their original positions.
+- All camera media and captured audio ISOs are referenced locally, without copying or transcoding recordings.
+- An independent continuous stereo primary audio track, plus a separate program-recording reference timeline where available.
+- Unsupported active transitions, keys, fades or unknown sources stop conversion with a useful error instead of being discarded.
+
+Resolve groups contiguous file segments into the same angle and recording-session multicam. Premiere uses one native multicam per physical MP4 segment, because its legacy XML importer drops additional files placed inside an angle. When a live cut spans a physical file boundary, the app adds a technical splice with the same angle selected on both sides. Original switch timing is retained; no real gap is collapsed.
+
+Safe reruns and errors
+
+Use the same output folder and project name to verify/reuse the same conversion. Changed source files, changed audio selection, conflicting editor projects or conflicting output manifests require a new output folder/name. Edited projects are not reset to the original cut list; validation reports differences instead. Keep the generated JSON manifests with the project. Save a copy before creative editing if you want the pristine conversion to remain verifiable.
+
+The app is validated for ATEM 1080p 29.97 DF camera recordings. Unsupported rates and ambiguous/missing timing are rejected. Automatic filename-prefix repair is applied only when every referenced camera file resolves under the root; WAV names do not need renaming. If a root contains multiple ATEM projects, the app presents a picker so you can select the original or repaired file.
+
+Sharing this build
+
+The app is self-contained for Apple Silicon Macs (macOS 13 minimum for the app; Resolve/Premiere may require newer macOS). This package is ad-hoc signed, not Apple notarized. A recipient's Gatekeeper may block a downloaded copy. It is a tested local/pre-release build, not a frictionless public release. Developer ID signing and Apple notarization require the publisher's Apple Developer identity; no valid identity was installed on this Mac. Do not disable system-wide security protections.
+
+The source includes sign-and-notarize.sh for the final release step, and package-dmg.sh to rebuild the distributable after signing. Intel and Windows builds are not included. A clean-environment test on this Mac passed; testing on a second, clean Mac remains outstanding.
+
+Project files do not contain the recordings. When sharing a project, also provide the original recording folder and relink it in the editor if the volume/path changes. The app itself contains no recordings or credentials. Python/FFmpeg licenses, complete runtime sources and rebuild recipe are included under the app's Contents/Resources/Legal.
+
+Advanced/local CLI
+
+The complete app source is supplied separately. engine/app_engine.py scan --root ROOT --output OUTPUT is the preflight/dry run. create --output OUTPUT --name NAME --audio program builds Resolve; premiere with the same flags writes Premiere interchange; verify-premiere --output OUTPUT --name NAME checks a saved native project. Invoke these with the bundled Python and put bundled runtime/ffprobe/bin on PATH.
+
+engine/convert.py supports explicit --input, --media-root, --output-dir, --name, --camera-names (JSON mapping), --repair-prefix OLD NEW, and --dry-run for advanced Resolve interchange generation. These tools are local and do not require Codex. The application code is released under the MIT license; bundled dependencies retain their own licenses.

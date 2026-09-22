@@ -19,7 +19,7 @@ This is an **ad-hoc signed, non-notarized prerelease**. Gatekeeper may block a d
 
 **Premiere:** tested with 26.2.2. Quit Premiere before creation. After import, use **File → Save As** to the exact output path shown by the app; native project verification then runs automatically.
 
-See [full instructions](Instructions.md) and [validation and limitations](Validation.md).
+See [full instructions](Documentation/Instructions.md) and [validation and limitations](Documentation/Validation.md).
 
 ## What it preserves
 
@@ -45,3 +45,7 @@ The app bundles Python and a minimal FFmpeg/ffprobe runtime. Complete dependency
 ## License
 
 ISO Assemble application code is [MIT licensed](LICENSE). Python and FFmpeg retain their respective PSF and LGPL licenses. DaVinci Resolve and Adobe Premiere are separately installed third-party products; this project is not affiliated with Blackmagic Design or Adobe.
+
+## Download layout
+
+The complete ZIP contains Installer, Documentation, Source, Licenses and Checksums folders. All Markdown documents also have plain-text (.txt) copies. Start with README.txt or Documentation/Instructions.txt.
