@@ -15,5 +15,5 @@ else
   cp "$README_PATH" "$STAGING/Documentation/Read Me.txt"
 fi
 ln -s /Applications "$STAGING/Applications"
-hdiutil create -volname 'ISO Assemble 1.2' -srcfolder "$STAGING" -format UDZO -ov "$DMG_PATH"
+hdiutil create -volname 'ISO Assemble 1.3' -srcfolder "$STAGING" -format UDZO -ov "$DMG_PATH"
 hdiutil verify "$DMG_PATH"

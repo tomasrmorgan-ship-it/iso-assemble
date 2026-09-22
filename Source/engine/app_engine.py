@@ -3,6 +3,7 @@
 import argparse,contextlib,hashlib,json,os,sys,time,traceback
 from pathlib import Path
 from atem import preflight
+from timing import Timing
 from convert import build
 from ingest import discover_project,repair_for,audio_catalog,project_candidates
 
@@ -21,6 +22,7 @@ def scan(root,out,selected=None):
  project=discover_project(root,selected);repair=repair_for(root,project)
  emit('progress',message='Reading the ATEM edit and checking every camera file…')
  data=preflight(project,root,repair)
+ emit('progress',message='Detected 1080p '+Timing.from_plan(data).resolve_rate+' '+Timing.from_plan(data).display+'; checking synchronization…')
  _,plan=build(data,'Preflight');plan['media']=data['media'];plan['_events']=data['events']
  emit('progress',message='Discovering program audio and all captured audio ISOs…')
  cat=audio_catalog(root,plan);cat.update(project=str(project),reference_repair=repair)
@@ -28,7 +30,7 @@ def scan(root,out,selected=None):
  package=dict(root=str(root),data=data,catalog=cat,snapshot=snapshot(paths))
  (out/'scan.json').write_text(json.dumps(package))
  (out/'audio-catalog.json').write_text(json.dumps(cat,indent=2))
- emit('scanned',root=str(root),output=str(out),cameras=len(plan['camera_names']),clips=len(data['media']),audioISOs=sum(x['kind']=='audio_iso' for x in cat['inventory']),sessions=len(plan['sessions']),cuts=sum(c['angle'] not in (0,None) for c in plan['cuts']),choices=[dict(id=c['id'],label=c['label']) for c in cat['candidates'] if c['selectable']],warnings=data['warnings']+cat['warnings'])
+ emit('scanned',frameRate=Timing.from_plan(data).resolve_rate+' '+Timing.from_plan(data).display,root=str(root),output=str(out),cameras=len(plan['camera_names']),clips=len(data['media']),audioISOs=sum(x['kind']=='audio_iso' for x in cat['inventory']),sessions=len(plan['sessions']),cuts=sum(c['angle'] not in (0,None) for c in plan['cuts']),choices=[dict(id=c['id'],label=c['label']) for c in cat['candidates'] if c['selectable']],warnings=data['warnings']+cat['warnings'])
 
 def create(out,name,primary):
  from resolve_project import connect,apply

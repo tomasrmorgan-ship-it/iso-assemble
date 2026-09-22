@@ -4,10 +4,11 @@ No project XML is modified. Unknown structures fail closed.
 """
 import gzip,json,xml.etree.ElementTree as E
 from pathlib import Path
-TICKS=8475667200 # 254016000000 ticks/sec * 1001/30000 seconds/frame
+from timing import Timing
 
 def verify(project,manifest):
  plan=json.loads(Path(manifest).read_text()) if not isinstance(manifest,dict) else manifest
+ TICKS=Timing.from_plan(plan).ticks
  raw=Path(project).read_bytes();root=E.fromstring(gzip.decompress(raw) if raw[:2]==b'\x1f\x8b' else raw)
  ids={e.get('ObjectID'):e for e in root if e.get('ObjectID')};uids={e.get('ObjectUID'):e for e in root if e.get('ObjectUID')}
  def ref(e):

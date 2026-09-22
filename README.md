@@ -4,7 +4,7 @@ A standalone Apple Silicon Mac app that turns ATEM ISO recordings into editable 
 
 ## Download
 
-**[Download version 1.2](https://github.com/tomasrmorgan-ship-it/iso-assemble/releases/tag/v1.2.0)** — choose the DMG for the app, or the complete ZIP for the app, source and instructions.
+**[Download version 1.3](https://github.com/tomasrmorgan-ship-it/iso-assemble/releases/tag/v1.3.0)** — choose the DMG for the app, or the complete ZIP for the app, source and instructions.
 
 This is an **ad-hoc signed, non-notarized prerelease**. Gatekeeper may block a downloaded copy. Apple Silicon only; the app requires macOS 13 or later, while your editor may require a newer system. No Intel or Windows build is provided.
 
@@ -28,7 +28,7 @@ See [full instructions](Documentation/Instructions.md) and [validation and limit
 - Independent stereo primary audio, with captured audio ISOs retained.
 - Local media references without unnecessary copying or transcoding.
 
-Validated scope is ATEM 1080p29.97 drop-frame. Unsupported active switcher effects stop conversion instead of silently disappearing. Premiere creates one multicam per physical camera-file segment and may add a same-angle splice at a rollover. Resolve can group contiguous segments within a recording-session multicam. These are native multicam edits, not flattened renders.
+Accepted ATEM modes are progressive 1080p at 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 fps. 29.97 and 59.94 accept drop-frame or non-drop-frame timecode; other rates use non-drop-frame. Rates are detected automatically and must match the media. See the validation report for editor-specific test coverage. Unsupported active switcher effects stop conversion instead of silently disappearing. Premiere creates one multicam per physical camera-file segment and may add a same-angle splice at a rollover. Resolve can group contiguous segments within a recording-session multicam. These are native multicam edits, not flattened renders.
 
 Camera labels come from the selected ATEM project. No private recordings or production projects are included in this repository or release package.
 

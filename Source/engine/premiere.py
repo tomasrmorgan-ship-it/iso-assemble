@@ -8,14 +8,8 @@ technical splice where a live cut crosses that boundary. No media is rendered.
 import copy,hashlib,json,xml.etree.ElementTree as E
 from pathlib import Path
 from convert import build
-def timecode(n):
- if n<0:raise ValueError('Negative timecode is unsupported')
- n%=2589408
- tens,remainder=divmod(n,17982)
- dropped=18*tens+2*max(0,(remainder-2)//1798)
- nominal=n+dropped
- h,rem=divmod(nominal,108000);m,rem=divmod(rem,1800);sec,f=divmod(rem,30)
- return f'{h:02d}:{m:02d}:{sec:02d};{f:02d}'
+from timing import Timing
+def timecode(n,timing=None):return (timing or Timing()).timecode(n)
 
 
 def el(p,t,value=None,**attrs):
@@ -23,30 +17,32 @@ def el(p,t,value=None,**attrs):
  if value is not None:e.text=str(value)
  return e
 
-def rate(p):
- r=el(p,'rate');el(r,'timebase',30);el(r,'ntsc','TRUE')
+def rate(p,timing=None):
+ timing=timing or Timing()
+ r=el(p,'rate');el(r,'timebase',timing.nominal);el(r,'ntsc','TRUE' if timing.fps.denominator==1001 else 'FALSE')
 
-def video_format(p):
+def video_format(p,timing=None):
  for k,v in [('width',1920),('height',1080),('anamorphic','FALSE'),('pixelaspectratio','square'),('fielddominance','none')]:el(p,k,v)
- rate(p)
+ rate(p,timing)
 
-def tc(p,n):
- t=el(p,'timecode');rate(t);el(t,'frame',n);el(t,'string',timecode(n));el(t,'displayformat','DF')
+def tc(p,n,timing=None):
+ timing=timing or Timing()
+ t=el(p,'timecode');rate(t,timing);el(t,'frame',n);el(t,'string',timecode(n,timing));el(t,'displayformat',timing.display)
 
 class Writer:
- def __init__(self):self.files={};self.angles=set()
+ def __init__(self,timing=None):self.files={};self.angles=set();self.timing=timing or Timing()
  def file(self,p,m,video=True):
   path=m['path'];key='file-'+hashlib.sha256(path.encode()).hexdigest()[:16]
   f=el(p,'file',id=key)
   if path in self.files:return f
   self.files[path]=m
-  el(f,'name',Path(path).name);el(f,'pathurl',Path(path).as_uri());rate(f);el(f,'duration',m['frames']);tc(f,m['start'])
+  el(f,'name',Path(path).name);el(f,'pathurl',Path(path).as_uri());rate(f,self.timing);el(f,'duration',m['frames']);tc(f,m['start'],self.timing)
   media=el(f,'media')
-  if video:video_format(el(el(media,'video'),'samplecharacteristics'))
+  if video:video_format(el(el(media,'video'),'samplecharacteristics'),self.timing)
   a=el(media,'audio');sc=el(a,'samplecharacteristics');el(sc,'depth',24 if path.lower().endswith('.wav') else 16);el(sc,'samplerate',m.get('sample_rate',48000));el(a,'channelcount',m.get('channels',2))
   return f
  def item(self,p,m,start,end,source=0,audio=False,name=None):
-  c=el(p,'clipitem');el(c,'name',name or Path(m['path']).name);el(c,'duration',m['frames']);rate(c)
+  c=el(p,'clipitem');el(c,'name',name or Path(m['path']).name);el(c,'duration',m['frames']);rate(c,self.timing)
   for k,v in [('start',start),('end',end),('in',source),('out',source+end-start)]:el(c,k,v)
   self.file(c,m,not m['path'].lower().endswith('.wav'))
   st=el(c,'sourcetrack');el(st,'mediatype','audio' if audio else 'video');el(st,'trackindex',1)
@@ -57,16 +53,16 @@ class Writer:
   c=el(p,'clip',id=aid)
   if aid in self.angles:return
   self.angles.add(aid)
-  el(c,'name',f'{m["camera"]} {m["name"]}');el(c,'duration',m['frames']);rate(c);el(c,'in',0);el(c,'out',m['frames']);el(c,'defaultangle',m['camera'])
+  el(c,'name',f'{m["camera"]} {m["name"]}');el(c,'duration',m['frames']);rate(c,self.timing);el(c,'in',0);el(c,'out',m['frames']);el(c,'defaultangle',m['camera'])
   self.item(el(el(el(c,'media'),'video'),'track'),m,0,m['frames'])
  def sequence(self,p,name,start,duration):
-  s=el(p,'sequence');el(s,'name',name);el(s,'duration',duration);rate(s);tc(s,start)
-  media=el(s,'media');v=el(media,'video');video_format(el(el(v,'format'),'samplecharacteristics'));vt=el(v,'track')
+  s=el(p,'sequence');el(s,'name',name);el(s,'duration',duration);rate(s,self.timing);tc(s,start,self.timing)
+  media=el(s,'media');v=el(media,'video');video_format(el(el(v,'format'),'samplecharacteristics'),self.timing);vt=el(v,'track')
   a=el(media,'audio');el(a,'numOutputChannels',2);sc=el(el(a,'format'),'samplecharacteristics');el(sc,'depth',16);el(sc,'samplerate',48000);at=el(a,'track')
   return s,vt,at
 
 def generate(package,name,primary):
- data=package['data'];cat=package['catalog'];_,plan=build(data,name)
+ data=package['data'];cat=package['catalog'];_,plan=build(data,name);timing=Timing.from_plan(plan)
  chosen=next((c for c in cat['candidates'] if c['id']==primary and c['selectable']),None)
  if not chosen:raise ValueError('Select a verified primary audio source.')
  if any(m.get('channels',2)!=2 for m in chosen['files']):raise ValueError('Premiere output currently supports stereo primary audio only.')
@@ -74,7 +70,7 @@ def generate(package,name,primary):
  for m in data['media']:groups.setdefault((m['start'],m['end']),[]).append(m)
  for g in groups.values():
   if sorted(m['camera'] for m in g)!=sorted(plan['camera_names']):raise ValueError('Premiere requires matching recording boundaries across every camera.')
- r=E.Element('xmeml',version='5');project=el(r,'project');el(project,'name',name);children=el(project,'children');w=Writer()
+ r=E.Element('xmeml',version='5');project=el(r,'project');el(project,'name',name);children=el(project,'children');w=Writer(timing)
  seq,vt,at=w.sequence(children,name+'_Edit',plan['origin'],plan['end']-plan['origin']);expected=[];splices=[]
  for cut in plan['cuts']:
   if cut['angle'] in (None,0):continue
@@ -84,7 +80,7 @@ def generate(package,name,primary):
    if b<=a:continue
    m=next(m for m in angles if m['camera']==cut['angle'])
    c=w.item(vt,m,a-plan['origin'],b-plan['origin'],a-start,name=f'{cut["angle"]} {m["name"]}')
-   mc=el(c,'multiclip',id=f'mc-{start}');el(mc,'name',f'{name}_Multicam_{timecode(start).replace(":","-").replace(";","-")}');el(mc,'collapsed','FALSE');el(mc,'synctype',1)
+   mc=el(c,'multiclip',id=f'mc-{start}');el(mc,'name',f'{name}_Multicam_{timecode(start,timing).replace(":","-").replace(";","-")}');el(mc,'collapsed','FALSE');el(mc,'synctype',1)
    for angle in sorted(angles,key=lambda x:x['camera']):
     ae=el(mc,'angle');el(ae,'activevideoangle','TRUE' if angle['camera']==cut['angle'] else 'FALSE');el(ae,'activeaudioangle','FALSE');w.angle(ae,angle)
    expected.append(dict(start=a,end=b,angle=cut['angle'],source_in=a-start,group_start=start,group_end=end));remaining-=b-a
@@ -99,7 +95,7 @@ def generate(package,name,primary):
  bin=el(children,'bin');el(bin,'name','All Audio ISOs');bc=el(bin,'children')
  for m in cat['inventory']:
   if m['kind']!='audio_iso':continue
-  c=el(bc,'clip');el(c,'name',Path(m['path']).name);el(c,'duration',m['frames']);rate(c);el(c,'in',0);el(c,'out',m['frames'])
+  c=el(bc,'clip');el(c,'name',Path(m['path']).name);el(c,'duration',m['frames']);rate(c,timing);el(c,'in',0);el(c,'out',m['frames'])
   w.item(el(el(el(c,'media'),'audio'),'track'),m,0,m['frames'],audio=True)
  # Premiere's stereo representation uses two linked exploded channels.
  serial=0
@@ -120,5 +116,5 @@ def generate(package,name,primary):
       f=c.find('file');f.clear();f.set('id',lc.find('file').get('id'))
    audio_node.append(right)
  E.indent(r)
- report=dict(name=name,origin=plan['origin'],end=plan['end'],cuts=expected,original_live_cuts=sum(c['angle'] not in (None,0) for c in plan['cuts']),native_multicam_groups=len(groups),technical_splices=splices,camera_names=plan['camera_names'],media_paths=sorted(w.files),audio=chosen,recording_sessions=plan['sessions'],warnings=data['warnings']+cat['warnings'],status='XML generated; Premiere import, Save As and native verification required')
+ report=dict(timing=timing.data(),name=name,origin=plan['origin'],end=plan['end'],cuts=expected,original_live_cuts=sum(c['angle'] not in (None,0) for c in plan['cuts']),native_multicam_groups=len(groups),technical_splices=splices,camera_names=plan['camera_names'],media_paths=sorted(w.files),audio=chosen,recording_sessions=plan['sessions'],warnings=data['warnings']+cat['warnings'],status='XML generated; Premiere import, Save As and native verification required')
  return E.tostring(r,encoding='utf-8',xml_declaration=True),report

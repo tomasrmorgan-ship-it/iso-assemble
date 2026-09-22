@@ -5,6 +5,7 @@ from pathlib import Path
 from fractions import Fraction
 from atem import probe,parse,preflight,frames
 from convert import build
+from timing import Timing
 
 def project_candidates(root):
  valid=[]
@@ -38,6 +39,7 @@ def repair_for(root,project,explicit=None):
  raise ValueError('Cannot infer one verified filename repair; use --repair-prefix')
 
 def audio_catalog(root,plan):
+ timing=Timing.from_plan(plan)
  root=Path(root).resolve();candidates={};inventory=[];warnings=[]
  camera_paths={m['path'] for m in plan['media']}
  for path in sorted(root.rglob('*')):
@@ -48,12 +50,12 @@ def audio_catalog(root,plan):
   print(f'Inspect audio: {path.name}',file=sys.stderr)
   d=probe(path);a=next((x for x in d['streams'] if x['codec_type']=='audio'),None);tags=d['format'].get('tags',{})
   if not a:inventory.append(dict(path=resolved,kind='other_media'));continue
-  duration=Fraction(a['duration_ts'])*Fraction(a['time_base']);n=duration*Fraction(30000,1001)
+  duration=Fraction(a['duration_ts'])*Fraction(a['time_base']);n=duration*timing.fps
   row=dict(path=resolved,kind='audio_iso' if path.suffix.lower() in ('.wav','.aif','.aiff','.flac') else 'program_or_other',sample_rate=int(a['sample_rate']),channels=a['channels'],duration_seconds=str(duration),frames=int(n) if n.denominator==1 else None,tags=tags)
   inventory.append(row)
   if tags.get('com.apple.proapps.cameraName')=='0':
-   v=next(x for x in d['streams'] if x['codec_type']=='video');start=frames(v['tags']['timecode']);key='program';label='ATEM stereo program mix'
-   if n.denominator!=1 or int(n)!=int(v['nb_frames']):raise ValueError(f'Program audio/video duration mismatch: {path}')
+   v=next(x for x in d['streams'] if x['codec_type']=='video');start=timing.frames(v['tags']['timecode']);key='program';label='ATEM stereo program mix'
+   if Fraction(v['avg_frame_rate'])!=timing.fps or n.denominator!=1 or int(n)!=int(v['nb_frames']):raise ValueError(f'Program audio/video duration mismatch: {path}')
   else:
    m=re.search(r'(CAM|MIC)\s+(\d+)\s+(\d+)\.(?:wav|aiff?|flac)$',path.name,re.I)
    if not m:
@@ -63,14 +65,14 @@ def audio_catalog(root,plan):
    matches=[s for s in plan['sessions'] if s['end']-s['start']==n and any(e['session']==i and e['state']['masterTimecode'][:8]==creation for i,x in enumerate(plan['sessions']) if x is s for e in plan.get('_events',[])[:])]
    # Match BWF start directly first; otherwise require exact recording duration AND original creation clock.
    ref=Fraction(int(tags['time_reference']),row['sample_rate']) if tags.get('time_reference','').isdigit() else None
-   direct=[s for s in plan['sessions'] if s['end']-s['start']==n and ref is not None and abs(ref-Fraction(s['start']*1001,30000))<=Fraction(1,row['sample_rate'])]
+   direct=[s for s in plan['sessions'] if s['end']-s['start']==n and ref is not None and abs(ref-timing.seconds(s['start']))<=Fraction(1,row['sample_rate'])]
    match=direct or matches
    if len(match)!=1:
     warnings.append(f'Imported but not selectable: cannot verify session timing for {path.name}');continue
-   start=match[0]['start'];expected=Fraction(start*1001,30000)
+   start=match[0]['start'];expected=timing.seconds(start)
    if ref is not None and abs(ref-expected)>Fraction(1,row['sample_rate']):
     boundaries={m['start'] for m in plan['media'] if match[0]['start']<m['start']<match[0]['end']}
-    if not any(abs(ref-Fraction(b*1001,30000))<=Fraction(1,row['sample_rate']) for b in boundaries):raise ValueError(f'Conflicting BWF timestamp in {path}; manual timing verification required')
+    if not any(abs(ref-timing.seconds(b))<=Fraction(1,row['sample_rate']) for b in boundaries):raise ValueError(f'Conflicting BWF timestamp in {path}; manual timing verification required')
     warnings.append(f'{path.name}: BWF time_reference points to internal file rollover; mapped full-length WAV using original creation clock plus exact recording duration')
   row.update(source_id=key,start=start,end=start+int(n))
   c=candidates.setdefault(key,dict(id=key,label=label,files=[]));c['files'].append(dict(path=resolved,start=start,end=start+int(n),frames=int(n),channels=row['channels'],sample_rate=row['sample_rate']))

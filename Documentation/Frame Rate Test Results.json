@@ -1,0 +1,62 @@
+[
+  {
+    "rate": "23.976",
+    "drop": false,
+    "cuts": 2,
+    "export_reimport": true
+  },
+  {
+    "rate": "24",
+    "drop": false,
+    "cuts": 2,
+    "export_reimport": true
+  },
+  {
+    "rate": "25",
+    "drop": false,
+    "cuts": 2,
+    "export_reimport": true
+  },
+  {
+    "rate": "29.97",
+    "drop": false,
+    "cuts": 2,
+    "export_reimport": true
+  },
+  {
+    "rate": "29.97",
+    "drop": true,
+    "cuts": 2,
+    "export_reimport": true
+  },
+  {
+    "rate": "30",
+    "drop": false,
+    "cuts": 2,
+    "export_reimport": true
+  },
+  {
+    "rate": "50",
+    "drop": false,
+    "cuts": 2,
+    "export_reimport": true
+  },
+  {
+    "rate": "59.94",
+    "drop": false,
+    "cuts": 2,
+    "export_reimport": true
+  },
+  {
+    "rate": "59.94",
+    "drop": true,
+    "cuts": 2,
+    "export_reimport": true
+  },
+  {
+    "rate": "60",
+    "drop": false,
+    "cuts": 2,
+    "export_reimport": true
+  }
+]

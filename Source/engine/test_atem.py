@@ -15,7 +15,7 @@ class TimingTests(unittest.TestCase):
   self.assertEqual(result['sources'][1]['name'],'Camera 2')
   self.assertEqual(initial['sources'][0]['file'],'01.mp4')
  def test_rollover_and_repeated_header(self):
-  records=[{'version':1,'recordingId':'a','masterTimecode':'23:59:59;29','mixEffectBlocks':[{'_index_':0,'source':3,'onAir':True}]},{'version':1,'recordingId':'a','masterTimecode':'00:00:00;00','mixEffectBlocks':[{'_index_':0,'source':4}]}]
+  records=[{'videoMode':'1080p29.97','version':1,'recordingId':'a','masterTimecode':'23:59:59;29','mixEffectBlocks':[{'_index_':0,'source':3,'onAir':True}]},{'videoMode':'1080p29.97','version':1,'recordingId':'a','masterTimecode':'00:00:00;00','mixEffectBlocks':[{'_index_':0,'source':4}]}]
   with tempfile.TemporaryDirectory() as t:
    p=Path(t)/'input.drp';p.write_text('\n'.join(map(json.dumps,records)));ev,_=parse(p)
   self.assertEqual(ev[1]['frame']-ev[0]['frame'],1)

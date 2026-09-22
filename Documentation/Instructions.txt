@@ -1,10 +1,10 @@
-ISO Assemble 1.2
+ISO Assemble 1.3
 
 A standalone Apple Silicon Mac app for ATEM ISO recordings. No Codex, account, Python installation, Homebrew, or internet connection is needed to convert recordings. Python and ffprobe are bundled. Your editing application and original media must be installed/available locally.
 
 Install and use
 
-1. Open ISO Assemble 1.2 Apple Silicon.dmg and drag ISO Assemble.app to Applications.
+1. Open ISO Assemble 1.3 Apple Silicon.dmg and drag ISO Assemble.app to Applications.
 2. Open the app and choose the recording root, such as My Recording. The root must contain its ATEM text-based .drp, Video ISO Files, and any Audio Source Files.
 3. Choose an output folder and project name. Scanning is a dry run: it checks timing and media without creating an editor project.
 4. Select Resolve or Premiere and explicitly choose the primary audio source. All audio ISOs are retained; only the selected source plays. Choose ATEM stereo program mix for the original live mix when available.
@@ -28,7 +28,7 @@ Safe reruns and errors
 
 Use the same output folder and project name to verify/reuse the same conversion. Changed source files, changed audio selection, conflicting editor projects or conflicting output manifests require a new output folder/name. Edited projects are not reset to the original cut list; validation reports differences instead. Keep the generated JSON manifests with the project. Save a copy before creative editing if you want the pristine conversion to remain verifiable.
 
-The app is validated for ATEM 1080p 29.97 DF camera recordings. Unsupported rates and ambiguous/missing timing are rejected. Automatic filename-prefix repair is applied only when every referenced camera file resolves under the root; WAV names do not need renaming. If a root contains multiple ATEM projects, the app presents a picker so you can select the original or repaired file.
+The app accepts progressive 1080p at 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 fps. Rates are detected from the ATEM header and checked against every camera file. 29.97 and 59.94 support DF or NDF; all other rates require NDF. Mixed rates, changes mid-project and missing video-mode headers are rejected. This does not convert media to a different frame rate. Resolve native import/save/reopen checks passed for every rate/mode; Premiere has automated XML/timing tests across those rates, with native-editor validation still limited to the earlier 29.97 DF project. Other rates, interlaced modes, other resolutions and ambiguous/missing timing are rejected. Automatic filename-prefix repair is applied only when every referenced camera file resolves under the root; WAV names do not need renaming. If a root contains multiple ATEM projects, the app presents a picker so you can select the original or repaired file.
 
 Sharing this build
 

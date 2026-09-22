@@ -4,6 +4,7 @@ import argparse,json,os,sys,platform,shutil
 from pathlib import Path
 from fractions import Fraction
 from atem import probe,frames
+from timing import Timing
 
 def connect():
  roots={'Darwin':'/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting/Modules','Windows':os.path.expandvars(r'%PROGRAMDATA%\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\Modules'),'Linux':'/opt/resolve/Developer/Scripting/Modules'}
@@ -18,6 +19,10 @@ def clips(folder):
  for f in folder.GetSubFolderList():yield from clips(f)
 
 def validate(t,plan):
+ timing=Timing.from_plan(plan)
+ actual_rate=str(t.GetSetting('timelineFrameRate')).split()[0]
+ if Fraction(actual_rate)!=Fraction(timing.resolve_rate):raise RuntimeError(f'Resolve timeline rate mismatch: {actual_rate}')
+ if timing.frames(t.GetStartTimecode())!=plan['origin']%timing.day:raise RuntimeError('Resolve timeline timecode origin or DF/NDF mismatch')
  actual=t.GetItemListInTrack('video',1);expected=[c for c in plan['cuts'] if c['angle'] not in (None,0)]
  if len(actual)!=len(expected):raise RuntimeError(f'Video item count {len(actual)} != {len(expected)}')
  for i,(item,cut) in enumerate(zip(actual,expected)):
@@ -27,7 +32,8 @@ def validate(t,plan):
   if (item.GetStart(),item.GetEnd(),item.GetName(),item.GetLeftOffset())!=(cut['start'],cut['end'],name,cut['start']-session['start']):raise RuntimeError(f'Cut {i} timing/angle differs: {item.GetName()}')
  return len(actual)
 
-def programs(root):
+def programs(root,timing=None):
+ timing=timing or Timing()
  result=[]
  for path in sorted(Path(root).glob('*.mp4')):
   if path.name.startswith('._'):continue
@@ -35,8 +41,8 @@ def programs(root):
   if d['format'].get('tags',{}).get('com.apple.proapps.cameraName')!='0':continue
   v=next(x for x in d['streams'] if x['codec_type']=='video');a=next((x for x in d['streams'] if x['codec_type']=='audio'),None)
   if not a or a.get('channels')!=2 or a.get('sample_rate')!='48000':raise RuntimeError(f'Unverified program audio: {path}')
-  if Fraction(v['avg_frame_rate'])!=Fraction(30000,1001) or Fraction(a['duration_ts'])*Fraction(a['time_base'])!=Fraction(int(v['nb_frames'])*1001,30000):raise RuntimeError(f'Program video/audio duration or rate mismatch: {path}')
-  result.append(dict(path=str(path.resolve()),start=frames(v['tags']['timecode']),frames=int(v['nb_frames'])))
+  if Fraction(v['avg_frame_rate'])!=timing.fps or Fraction(a['duration_ts'])*Fraction(a['time_base'])!=timing.seconds(int(v['nb_frames'])):raise RuntimeError(f'Program video/audio duration or rate mismatch: {path}')
+  result.append(dict(path=str(path.resolve()),start=timing.frames(v['tags']['timecode']),frames=int(v['nb_frames'])))
  if not result:raise RuntimeError('No identifiable ATEM program mix (cameraName=0). Ask the user which mix to use.')
  return result
 
@@ -52,7 +58,7 @@ def append_verified(mp,t,m,start,count,kind,track=1):
  raise RuntimeError(f'Cannot append exact duration {count} for {m.GetName()}')
 
 def apply(plan_path):
- plan_path=Path(plan_path).resolve();out=plan_path.parent;plan=json.loads(plan_path.read_text());name=plan['name'];statefile=out/'resolve-state.json';r=connect();pm=r.GetProjectManager();existing=name in pm.GetProjectListInCurrentFolder()
+ plan_path=Path(plan_path).resolve();out=plan_path.parent;plan=json.loads(plan_path.read_text());timing=Timing.from_plan(plan);name=plan['name'];statefile=out/'resolve-state.json';r=connect();pm=r.GetProjectManager();existing=name in pm.GetProjectListInCurrentFolder()
  state=json.loads(statefile.read_text()) if statefile.exists() else None
  if existing and (not state or state.get('fingerprint')!=plan['fingerprint']):raise RuntimeError('Project name already exists without matching conversion state; choose a new project name. No existing project was modified.')
  print(f'Resolve {r.GetVersionString()}: {name}',flush=True)
@@ -64,11 +70,12 @@ def apply(plan_path):
  mp=p.GetMediaPool();all_t={p.GetTimelineByIndex(i).GetName():p.GetTimelineByIndex(i) for i in range(1,p.GetTimelineCount()+1)}
  edit=all_t.get(name+'_Edit')
  if not edit:
-  p.SetSetting('timelineFrameRate','29.97');p.SetSetting('timelineResolutionWidth','1920');p.SetSetting('timelineResolutionHeight','1080')
+  if not p.SetSetting('timelineFrameRate',timing.resolve_rate+(' DF' if timing.drop else '')):raise RuntimeError('Resolve rejected the requested timeline frame rate')
+  p.SetSetting('timelineResolutionWidth','1920');p.SetSetting('timelineResolutionHeight','1080')
   edit=mp.ImportTimelineFromFile(str(out/(name+'.fcpxml')))
   if not edit:raise RuntimeError('Resolve timeline import failed')
  count=validate(edit,plan);print(f'Validated {count} native multicam cuts',flush=True)
- pg=programs(plan['media_root']);selected=plan.get('audio',{'selected':'program','label':'ATEM Program Mix','files':pg});
+ pg=programs(plan['media_root'],timing);selected=plan.get('audio',{'selected':'program','label':'ATEM Program Mix','files':pg});
  all_audio=[x['path'] for x in plan.get('audio_inventory',[]) if x['kind']=='audio_iso']
  mp.ImportMedia([x['path'] for x in pg]+all_audio);pool={c.GetClipProperty('File Path'):c for c in clips(mp.GetRootFolder())}
  session_media=[]
