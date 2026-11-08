@@ -1,10 +1,10 @@
-# ISO Assemble 1.4.2
+# ISO Assemble 1.4.3
 
 A standalone Apple Silicon Mac app for ATEM ISO recordings. Create editable multicam projects for DaVinci Resolve or Adobe Premiere Pro, or create camera MOV files carrying one shared audio source. Processing stays local; no Codex, account, cloud service, Homebrew or separate Python installation is required.
 
 ## Download and release status
 
-Version 1.4.2 (build 7) is supplied as a local DMG and source package; it has not been published as a GitHub release. The earlier [version 1.3 release](https://github.com/tomasrmorgan-ship-it/iso-assemble/releases/tag/v1.3.0) remains available. See [validation and limitations](Documentation/Validation.md) for the version 1.4.2 compatibility change, earlier conversion checks and historical editor coverage.
+Version **1.4.3 (build 8)** creates a fresh Resolve project on every Create run, organizes its media bins, and verifies that the finished cut timeline is active when the project is exported and reopened. The installer and source package are available from the [1.4.3 release page](https://github.com/tomasrmorgan-ship-it/iso-assemble/releases/tag/v1.4.3). See [validation and limitations](Documentation/Validation.md) for completed checks and editor coverage.
 
 Start with **What would you like to create?** at the top of the app. On first launch, choose an output before selecting a recording folder; the app does not choose an editor for you. Later launches restore your last selected output mode.
 
@@ -30,7 +30,11 @@ This mode needs no Resolve or Premiere installation and does not read or rewrite
 
 **Resolve:** requires Studio 21 or later; optional Mix review requires 21.1 or later. Finish Resolve’s first-launch setup, select a local project library, and enable **Preferences → System → General → External scripting using → Local**. The app checks your installed Resolve with a small native multicam save/export/reimport test before attempting the full conversion. A version number alone is not proof of compatibility.
 
-**Create Resolve Project produces an actual `<project name>.drp` in your chosen results folder.** The project is created inside Resolve, exported, reopened and validated. Choose this mode for an editable multicam DRP even when your source camera files are MOVs.
+**Create New Resolve Project produces a fresh native DRP on every run.** Choose the recording root, scan it, and click Create. Each run writes to its own dated folder under `Projects` inside your selected results folder. If the requested Resolve project name already exists, the app chooses a unique name. It creates, exports, reopens and validates the new project without reusing earlier exports, saved conversion state or compatibility proofs. Existing projects and source recordings remain unchanged. The export's SHA-256 identifies the exact DRP that was checked. Choose this mode for an editable multicam DRP even when your source camera files are MOVs.
+
+The finished `<project name>_Edit` timeline opens on the Edit page at its first actual camera cut. The media pool has `01 Edit`, `02 Multicam`, `03 Camera Originals` with a bin per camera, `04 Audio ISOs`, and `05 Program Reference`. Open the timeline in `01 Edit` to edit the live cuts; the clips in `02 Multicam` contain the underlying angles.
+
+Optional macOS **Accessibility** permission lets ISO Assemble prepare Resolve's Multicam viewer and fit the timeline to its full length. Project creation and verification work without this permission; you can set those view options manually. Viewer preparation is separate from the saved DRP and does not alter the edit. See the [Resolve viewing instructions](Documentation/Instructions.md#open-the-finished-resolve-edit).
 
 **Premiere:** previously tested with 26.2.2. Quit Premiere before creation. After import, use **File → Save As** to the exact output path shown by the app; native project verification then runs automatically.
 

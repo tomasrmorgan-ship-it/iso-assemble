@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Apply a conversion manifest using the installed Resolve scripting API."""
-import argparse,json,os,sys,platform,shutil
+import argparse,json,os,sys,platform,shutil,hashlib
 from pathlib import Path
 from fractions import Fraction
 from atem import probe,frames
 from timing import Timing
+from project_layout import organize_project,select_edit_session
+
+PRESENTATION_REVISION=1
 
 def connect():
  roots={'Darwin':'/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting/Modules','Windows':os.path.expandvars(r'%PROGRAMDATA%\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\Modules'),'Linux':'/opt/resolve/Developer/Scripting/Modules'}
@@ -131,7 +134,7 @@ def apply(plan_path):
  if not p:raise RuntimeError('Cannot create/load target project')
  if state and state['project_id']!=p.GetUniqueId():raise RuntimeError('Project identity differs from saved conversion state')
  previous_state=state or {}
- state=dict(fingerprint=plan['fingerprint'],project_id=p.GetUniqueId(),name=name,complete=False);statefile.write_text(json.dumps(state,indent=2))
+ state={**previous_state,'fingerprint':plan['fingerprint'],'project_id':p.GetUniqueId(),'name':name,'complete':previous_state.get('complete',False)};statefile.write_text(json.dumps(state,indent=2))
  mp=p.GetMediaPool();all_t={p.GetTimelineByIndex(i).GetName():p.GetTimelineByIndex(i) for i in range(1,p.GetTimelineCount()+1)}
  edit=all_t.get(name+'_Edit')
  if not edit:
@@ -144,7 +147,16 @@ def apply(plan_path):
  if transitions:print(f'Applied and verified {transitions} linear dissolves; {len(plan.get("review_markers",[]))} unresolved Mix events marked for review',flush=True)
  pg=programs(plan['media_root'],timing);selected=plan.get('audio',{'selected':'program','label':'ATEM Program Mix','files':pg});
  all_audio=[x['path'] for x in plan.get('audio_inventory',[]) if x['kind']=='audio_iso']
- mp.ImportMedia([x['path'] for x in pg]+all_audio);pool={c.GetClipProperty('File Path'):c for c in clips(mp.GetRootFolder())}
+ # Resolve may deduplicate imports only within the current media bin. Search
+ # the entire pool before importing so organized reruns do not add duplicates.
+ pool={c.GetClipProperty('File Path'):c for c in clips(mp.GetRootFolder())}
+ wanted=list(dict.fromkeys([x['path'] for x in pg]+all_audio))
+ missing=[path for path in wanted if path not in pool]
+ if missing:
+  mp.ImportMedia(missing)
+  pool={c.GetClipProperty('File Path'):c for c in clips(mp.GetRootFolder())}
+  unresolved=[path for path in missing if path not in pool]
+  if unresolved:raise RuntimeError('Resolve did not import the required audio/program media: '+', '.join(unresolved))
  session_media=[]
  selected_files=selected['files']
  for session in plan['sessions']:
@@ -161,7 +173,7 @@ def apply(plan_path):
    n=int(m.GetClipProperty('Frames') or f['frames'])
    if cursor+n>session['end']:raise RuntimeError('Program span exceeds recording boundary')
    session_media.append((m,cursor,n));cursor+=n
- p.SetCurrentTimeline(edit)
+ if not p.SetCurrentTimeline(edit):raise RuntimeError('Resolve could not open the cut timeline for independent audio')
  audio=edit.GetItemListInTrack('audio',1)
  if audio:
   if [(a.GetStart(),a.GetEnd()) for a in audio]!=[(s,s+n) for _,s,n in session_media]:raise RuntimeError('Existing audio does not match verified program coverage; stop rather than duplicate')
@@ -179,17 +191,40 @@ def apply(plan_path):
     if cursor+n>session['end']:raise RuntimeError('Program reference exceeds recording boundary')
     append_verified(mp,reference,m,cursor,n,1);append_verified(mp,reference,m,cursor,n,2);cursor+=n
   reference.SetTrackName('audio',1,'Original program mix')
- p.SetCurrentTimeline(edit)
+ plan['program_files']=pg
+ layout=organize_project(p,plan)
+ session=select_edit_session(r,p,plan)
+ plan['presentation_revision']=PRESENTATION_REVISION
+ plan_path.write_text(json.dumps(plan,indent=2))
  if not pm.SaveProject():raise RuntimeError('Resolve save failed')
  target=out/(name+'.drp')
  if target.resolve()==Path(plan['input']).resolve():raise RuntimeError('Export would overwrite original ATEM project')
+ if target.is_symlink():raise RuntimeError('Export destination must not be a symbolic link')
  if target.exists():
-  if previous_state.get('complete') and previous_state.get('export')==str(target):
+  if not previous_state.get('complete') or previous_state.get('export')!=str(target):
+   raise RuntimeError('Export destination already exists; refusing to overwrite')
+  actual_hash=hashlib.sha256(target.read_bytes()).hexdigest()
+  verified=out/'validation.json'
+  prior_report=json.loads(verified.read_text()) if verified.exists() else {}
+  owned_hash=previous_state.get('export_sha256') or (prior_report.get('export_sha256') if prior_report.get('export')==str(target) else None)
+  if target.is_symlink() or owned_hash!=actual_hash:raise RuntimeError('Existing DRP differs from the verified export. Choose a new output folder to preserve it.')
+  if previous_state.get('presentation_revision')==PRESENTATION_REVISION:
+   previous_state.update(layout=layout,edit_session=session)
    statefile.write_text(json.dumps(previous_state,indent=2));print(f'Already exported and validated: {target}',flush=True);return
-  raise RuntimeError('Export destination already exists; refusing to overwrite')
- # Export is only allowed into this conversion-owned directory.
- if not pm.ExportProject(name,str(target)):raise RuntimeError('Resolve project export failed')
- state.update(complete=True,resolve_version=r.GetVersionString(),cuts_verified=count,transitions_verified=transitions,export=str(target));statefile.write_text(json.dumps(state,indent=2))
+  # Upgrade only an exact, previously verified app export; retain the old file.
+  backup=out/(name+'.before-edit-layout-'+actual_hash[:12]+'.drp')
+  if backup.is_symlink() or (backup.exists() and hashlib.sha256(backup.read_bytes()).hexdigest()!=actual_hash):raise RuntimeError('Previous-export backup collision; existing files preserved')
+  if not backup.exists():shutil.copy2(target,backup)
+  pending=out/(name+'.layout-update.drp')
+  if pending.exists() or pending.is_symlink():raise RuntimeError('An unfinished layout export exists. Choose a new output folder; existing exports preserved.')
+  if not pm.ExportProject(name,str(pending)):raise RuntimeError('Resolve layout export failed; the previous DRP is preserved')
+  if pending.is_symlink() or not pending.is_file() or pending.stat().st_size==0:raise RuntimeError('Resolve produced no usable layout export; the previous DRP is preserved')
+  os.replace(pending,target)
+  state['previous_export']=str(backup)
+ else:
+  if not pm.ExportProject(name,str(target)):raise RuntimeError('Resolve project export failed')
+ if target.is_symlink() or not target.is_file() or target.stat().st_size==0:raise RuntimeError('Resolve produced no usable project export')
+ state.update(complete=True,resolve_version=r.GetVersionString(),cuts_verified=count,transitions_verified=transitions,export=str(target),export_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),presentation_revision=PRESENTATION_REVISION,layout=layout,edit_session=session);statefile.write_text(json.dumps(state,indent=2))
  print(f'Exported {target}. Reimport and UI verification remain required.',flush=True)
 
 def main():

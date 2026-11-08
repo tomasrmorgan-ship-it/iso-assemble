@@ -1,6 +1,6 @@
 # Camera files with shared audio
 
-This mode, introduced in ISO Assemble 1.4 and included in 1.4.1, puts one chosen ATEM audio source on every camera angle. It writes new MOV files containing each camera's unchanged compressed video, original timecode and the selected WAV audio as 24-bit PCM. It does not need Resolve, Premiere or a DRP.
+This mode, introduced in ISO Assemble 1.4 and included in 1.4.3, puts one chosen ATEM audio source on every camera angle. It writes new MOV files containing each camera's unchanged compressed video, original timecode and the selected WAV audio as 24-bit PCM. It does not need Resolve, Premiere or a DRP.
 
 ## Choose the folder and audio source
 
@@ -79,4 +79,4 @@ Creation and full verification read large amounts of data. Drive speed and compe
 
 ## Use the results
 
-Import the new MOVs manually into Resolve, Premiere or another compatible editor. The ATEM DRP is untouched and still references its original media paths. If it points to MP4 files that have been replaced by MOV copies, project mode reports that mismatch instead of approving those replacements automatically. No live cuts, multicam sequence or editor relinking is performed by shared-audio mode. Use the separate multicam-project mode when you need supported live switching reconstructed as an editable project.
+Import the new MOVs manually into Resolve, Premiere or another compatible editor. The ATEM DRP is untouched and still references its original media paths. If its MP4 references need MOV replacements, the separate project mode can relink a complete matching set after verifying camera/part identity, frame counts, rate and timing. Each relink is reported; unavailable original MP4 contents cannot be compared. No live cuts, multicam sequence or editor relinking is performed by shared-audio mode. Use the separate multicam-project mode when you need supported live switching reconstructed as an editable project.

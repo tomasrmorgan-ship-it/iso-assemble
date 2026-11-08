@@ -1,10 +1,34 @@
 # Validation and limitations
 
-## Version 1.4.2: Resolve runtime compatibility
+## Version 1.4.3: organized media and the active cut timeline
+
+Version 1.4.3 (build 8) addresses the handoff into Resolve: native multicam source clips and the finished cut timeline are placed in separate, clearly named bins. The generated edit is selected before save/export. Reopen validation checks that the active timeline is the finished edit and verifies its organized media. The completed export is identified by SHA-256, so an earlier verification project cannot stand in for changed DRP bytes.
+
+Each normal Resolve Create now allocates a new dated run folder under the selected results folder's `Projects` directory and uses an available Resolve project name. Existing exports, legacy conversion state and previous compatibility reports do not supply the new result. The run performs its own compatibility proof and exact-export validation, preserving older projects and original media. Successful runs clean up only their own temporary test projects after checking identity; cleanup problems preserve the affected project and are reported. Lower-level ownership and idempotence checks remain implementation safeguards; they do not make the normal app reuse an earlier conversion.
+
+Organization uses supported media-pool APIs. Only exact manifest source paths, generated multicam names and generated timeline identities are eligible to move. Camera originals, audio ISOs and program references remain local file references. Unrelated clips stay in their existing bins. Duplicate matches and conflicting ownership stop with a readable error. The layout helper is idempotent within one owned project; a new app Create still gets a fresh project.
+
+The selection check places the playhead on the first actual native multicam cut, verifies its camera selection and frame interval, and handles drop-frame and midnight timecodes with integer arithmetic. Read-only inspection always requires the finished edit to be active. It can separately require the first-cut position; the current bin and playhead are otherwise reported without assuming those interface choices persist across project import.
+
+The version 1.4.3 source suite passed **198 of 198 tests**, including all **four generated-media integration tests**. The 23 focused layout tests cover preserved unrelated clips, ambiguous source/bin rejection, failed or unapplied API calls, active timeline identity, first-cut selection after a gap or black, and midnight readback. The broader suite includes fresh-run isolation, project ownership, exact-export verification, compatibility, timing, audio mapping and existing exporters. API stand-ins and generated-media checks are automated evidence; the native editor checks below are separate.
+
+Inside **Resolve Studio 21.1.1.10**, a generated recording with two MOV camera sources, two native multicam cuts, a ten-frame Mix and independent WAV audio passed creation, save, export and reimport. Supported API checks confirmed organized bins, the active finished edit, the first actual cut, camera selections, timing, media and audio. The exact exported DRP was identified by SHA-256.
+
+In the native editor UI, a video-only change to Camera 2 was made with Option-click. The project was exported and reimported, retaining that angle selection, two video cuts and one independent audio item. The UI also displayed the camera-angle grid, program picture, cut timeline and WAV audio after the documented manual viewing steps. This is a small-fixture editability check, not a full-production visual review.
+
+The actual 1.4.3 QA app then completed **two consecutive Create New Resolve Project runs**, using an existing results folder and a project name already present in Resolve. Each generated a distinct new project, run folder and DRP, performed its own native compatibility proof, exported and reimported the finished edit, and returned to that Edit timeline. Six owned temporary test projects were removed without warnings, leaving only one additional finished project per Create. Earlier DRP hashes were unchanged. This verifies the normal fresh-run workflow.
+
+Optional macOS Accessibility automation prepares the Multicam viewer and Full Extent Zoom. It is separate from project construction and API verification. The app's permission-denied path was tested: it preserved successful DRP creation and supplied the manual fallback. The equivalent manual controls were exercised through desktop automation. The bundled helper's permission-granted path has not yet been validated. A DRP does not guarantee viewer layout on a recipient's Mac, and the helper does not perform or claim an unattended angle-change test.
+
+Packaging checks passed for the 1.4.3 DMG: disk-image integrity verification, a read-only mount and strict app-signature verification. The app's bundled runtime ran the 198-test suite with **194 passing and four optional fixture-generation integration tests skipped**; the separate source run passed all 198 with those integrations enabled. The build remains ad-hoc signed and non-notarized.
+
+Resolve 21.2.0.6, a clean second Mac, full-production visual review and new Premiere editor validation remain outside this patch's native test coverage.
+
+## Version 1.4.2: historical Resolve runtime compatibility
 
 Version 1.4.1 rejected Resolve Studio **21.2.0.6** because its version check allowed only two exact build strings. Version 1.4.2 (build 7) removes that whitelist: cut-only conversion requires Studio 21 or later, while optional Mix review requires Studio 21.1 or later. Meeting the minimum version permits a runtime check; it does not guarantee that every later Resolve release works.
 
-Before full conversion, the app checks the installed Resolve with a small native two-angle, two-selection multicam project, including save, export and reimport. Mix mode also requires a native Cross Dissolve with verified geometry. The proof uses ownership-checked projects and a `Resolve Compatibility/Compatibility Report.json` report. A cached result must match the Resolve version, recording timing, source snapshot and proof code. The previously open project is restored before success is recorded. Failure stops full conversion rather than bypassing the check. The main conversion still creates its project inside Resolve, exports a native DRP to the selected results folder, then reopens and validates that export.
+In version 1.4.2, before full conversion, the app checked the installed Resolve with a small native two-angle, two-selection multicam project, including save, export and reimport. Mix mode also requires a native Cross Dissolve with verified geometry. The proof uses ownership-checked projects and a `Resolve Compatibility/Compatibility Report.json` report. That release allowed a cached result only when it matched the Resolve version, recording timing, source snapshot and proof code. Version 1.4.3 instead uses a fresh proof folder for each normal Create run. The previously open project is restored before success is recorded. Failure stops full conversion rather than bypassing the check. The main conversion still creates its project inside Resolve, exports a native DRP to the selected results folder, then reopens and validates that export.
 
 The version 1.4.2 source suite passed **134 of 134 tests**, including **16 compatibility tests** and all four generated-media integration tests. Version-gate tests accept **21.2.0.6**. That is automated version-policy coverage, not a native test of Resolve 21.2.0.6 on another machine.
 
@@ -35,7 +59,7 @@ No full-production visual review or UI angle-switch exercise was performed for e
 
 The standalone 1.4.1 app UI also completed the production folder scan: 24 MOVs, 20 WAVs, 980 video selections and 11 audio choices. The optional Mix checkbox was visible, unchecked by default, and supplied the reviewed policy only when enabled. Scan warnings describe the pre-application plan; the subsequent export/reimport validation records the 405 applied and verified transitions.
 
-Version 1.4.1 source suite: **117 of 117 tests passed**, including four generated-media integration checks. Native standalone UI scan passed on the converted MOV recording. App signature verification passed. The installer is packaged locally; no GitHub release publication is claimed.
+Version 1.4.1 source suite: **117 of 117 tests passed**, including four generated-media integration checks. Native standalone UI scan passed on the converted MOV recording. App signature verification passed. These checks describe the 1.4.1 implementation and do not establish later-version editor coverage.
 
 ## Version 1.4 shared-audio mode
 

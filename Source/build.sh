@@ -14,7 +14,7 @@ fi
 cp "$SOURCE_DIR"/engine/*.py "$APP_DIR/Contents/Resources/engine/"
 mkdir -p "$APP_DIR/Contents/Resources/Legal"
 cp "$SOURCE_DIR/LICENSE" "$APP_DIR/Contents/Resources/Legal/ISO-Assemble-MIT-LICENSE.txt"
-xcrun swiftc -O -target arm64-apple-macos13.0 -framework Cocoa "$SOURCE_DIR/ISOAssemble.swift" -o "$APP_DIR/Contents/MacOS/ISOAssemble"
+xcrun swiftc -O -target arm64-apple-macos13.0 -framework Cocoa "$SOURCE_DIR/ISOAssemble.swift" "$SOURCE_DIR/ResolveViewer.swift" -o "$APP_DIR/Contents/MacOS/ISOAssemble"
 cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -24,8 +24,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>ISO Assemble</string>
 <key>CFBundleDisplayName</key><string>ISO Assemble</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.4.2</string>
-<key>CFBundleVersion</key><string>7</string>
+<key>CFBundleShortVersionString</key><string>1.4.3</string>
+<key>CFBundleVersion</key><string>8</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

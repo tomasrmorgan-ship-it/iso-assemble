@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """ISO Assemble's local application bridge. JSON events are consumed by the native UI."""
-import argparse,contextlib,hashlib,json,os,sys,time,traceback
+import argparse,contextlib,hashlib,json,os,sys,time,traceback,shutil
 from pathlib import Path
 from atem import preflight,parse
 from timing import Timing
@@ -85,6 +85,9 @@ def create(out,name,primary):
  from resolve_project import connect,apply
  from resolve_compatibility import check_version,ensure_compatible
  from verify_project import verify
+ from project_layout import select_edit_session
+ from export_validation import load_export_for_verification
+ from fresh_run import allocate_fresh_run,cleanup_test_projects
  out=Path(out).resolve();package=json.loads((out/'scan.json').read_text());data=package['data'];cat=package['catalog']
  if snapshot(package['snapshot'])!=package['snapshot']:raise ValueError('The recording files changed after scanning. Choose the folder again to rescan before creating the project.')
  if not name.strip() or '/' in name or '\\' in name or name in ('.','..'):raise ValueError('Enter a project name without path separators.')
@@ -101,6 +104,13 @@ def create(out,name,primary):
    time.sleep(2)
  version=r.GetVersionString()
  check_version(version,needs_mix=mix_policy=='linear-review')
+ scan_output=out;requested_name=name
+ pm=r.GetProjectManager()
+ out,name=allocate_fresh_run(scan_output,requested_name,pm.GetProjectListInCurrentFolder())
+ for filename in ('scan.json','audio-catalog.json','ATEM Review.json','ATEM Review.txt'):
+  source=scan_output/filename
+  if source.is_file() and not source.is_symlink():shutil.copy2(source,out/filename)
+ emit('progress',message=f'Creating a fresh project: {name}. Previous conversions will not be reused.')
  xml,plan=build(data,name,mix_policy=mix_policy);fingerprint=conversion_fingerprint(xml,chosen,package['snapshot'],plan)
  plan.update(name=name,input=data['input'],input_sha256=data['sha256'],media_root=package['root'],fingerprint=fingerprint,media=[{k:v for k,v in m.items() if k!='probe'} for m in data['media']],warnings=data['warnings']+cat['warnings']+plan.get('transition_warnings',[]),audio=dict(selected=chosen['id'],label=chosen['label'],files=chosen['files']),audio_inventory=cat['inventory'])
  manifest=out/'conversion.json'
@@ -108,33 +118,35 @@ def create(out,name,primary):
  pm=r.GetProjectManager();existing=pm.GetProjectListInCurrentFolder()
  if name in existing and not (out/'resolve-state.json').exists():raise ValueError(f'A Resolve project named {name} already exists. Choose a different project name; it has not been changed.')
  compatibility=ensure_compatible(r,data,out,needs_mix=mix_policy=='linear-review',progress=lambda message:emit('progress',message=message))
+ plan['requested_name']=requested_name
  plan['resolve_compatibility']=compatibility
  manifest.write_text(json.dumps(plan,indent=2));(out/(name+'.fcpxml')).write_bytes(xml)
  emit('progress',message='Creating native multicam clips, reconstructing live cuts, and importing all audio ISOs…')
  with contextlib.redirect_stdout(sys.stderr):apply(manifest)
  emit('progress',message='Reopening the exported project and verifying native multicam cuts, media and audio…')
- target=out/(name+'.drp');checkfile=out/'export-check-state.json';check=json.loads(checkfile.read_text()) if checkfile.exists() else {}
- checkname='ISOAssemble_Verify_'+fingerprint[:12]
- if checkname in pm.GetProjectListInCurrentFolder():
-  if check.get('name')!=checkname:raise RuntimeError('Verification project name collision. Existing project preserved.')
- else:
-  if not pm.ImportProject(str(target),checkname):raise RuntimeError('Resolve could not reimport the exported project.')
-  check=dict(name=checkname);checkfile.write_text(json.dumps(check))
- p=pm.LoadProject(checkname)
- if not p:raise RuntimeError('Could not open the export verification project.')
- if check.get('project_id') and p.GetUniqueId()!=check['project_id']:raise RuntimeError('Verification project identity changed; existing project preserved.')
- check['project_id']=p.GetUniqueId();checkfile.write_text(json.dumps(check))
- report=verify(manifest);report['export']=str(target);report['export_sha256']=hashlib.sha256(target.read_bytes()).hexdigest();report['verification']='Automatic Resolve API checks after native export and reimport. No UI angle-switch check performed by this run.'
+ plan=json.loads(manifest.read_text())
+ target=out/(name+'.drp')
+ p,export_check=load_export_for_verification(pm,target,out/'export-check-state.json',fingerprint)
+ report=verify(manifest);report['export']=str(target);report['export_sha256']=export_check['export_sha256'];report['export_import']=export_check;report['verification']='Automatic Resolve API checks after native export and reimport, including active edit timeline and organized media bins. Viewer controls are checked separately by the app.'
  report.update(mix_policy=mix_policy,transition_warnings=plan.get('transition_warnings',[]),review_markers=plan.get('review_markers',[]),requires_review=bool(plan.get('transitions')))
  (out/'validation.json').write_text(json.dumps(report,indent=2))
- p=pm.LoadProject(name);t=next(p.GetTimelineByIndex(i) for i in range(1,p.GetTimelineCount()+1) if p.GetTimelineByIndex(i).GetName()==name+'_Edit');p.SetCurrentTimeline(t);r.OpenPage('edit');pm.SaveProject()
- message='Project created, exported and reopened successfully. Ready to edit in Resolve.'
+ proof_state=json.loads((out/'Resolve Compatibility'/'state.json').read_text())
+ owned_tests={**proof_state['project_ids'],export_check['name']:export_check['project_id']}
+ emit('progress',message='Verification passed. Removing this run’s temporary test projects and opening the finished edit…')
+ report['temporary_project_cleanup']=cleanup_test_projects(pm,owned_tests,name)
+ for warning in report['temporary_project_cleanup']['warnings']:emit('progress',message=warning)
+ p=pm.LoadProject(name)
+ if not p:raise RuntimeError('Could not return to the completed editing project')
+ report['final_edit_session']=select_edit_session(r,p,plan)
+ if not pm.SaveProject():raise RuntimeError('Resolve could not save the selected edit session')
+ (out/'validation.json').write_text(json.dumps(report,indent=2))
+ message='Project exported and reopened on the finished cut timeline. Media is organized into bins.'
  status=mix_status(plan)
  if plan.get('transitions'):
   status['transitionStatus']='applied-review-required'
   message=(f'Project created, exported and reopened. {status["linearTransitions"]} linear Mix transitions were reconstructed; '
            f'{status["unresolvedTransitions"]} marked intervals and the original fader curves still need comparison with the program reference.')
- emit('complete',export=str(target),project=name,cuts=report['cuts_verified'],audio=chosen['label'],message=message,**status)
+ emit('complete',export=str(target),output=str(out),project=name,prepareViewer=True,timeline=name+'_Edit',cuts=report['cuts_verified'],audio=chosen['label'],message=message,**status)
 
 def premiere_create(out,name,primary):
  from premiere import generate

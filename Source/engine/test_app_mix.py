@@ -108,7 +108,11 @@ class MixBridgeTests(unittest.TestCase):
                         app_engine.create(root,'Test','program')
                 apply.assert_called_once()
                 proof.assert_called_once()
-                plan=json.loads((root/'conversion.json').read_text())
+                manifest=Path(apply.call_args.args[0])
+                self.assertTrue(manifest.is_relative_to(root.resolve()/'Projects'))
+                self.assertEqual(Path(proof.call_args.args[2]),manifest.parent)
+                self.assertFalse((root/'conversion.json').exists())
+                plan=json.loads(manifest.read_text())
                 self.assertEqual(plan['mix_policy'],policy)
                 self.assertIn('Original warning',plan['warnings']);self.assertIn('Audio warning',plan['warnings'])
                 self.assertEqual(len(plan['transitions']),1 if active else 0)
@@ -127,6 +131,38 @@ class MixBridgeTests(unittest.TestCase):
                     app_engine.create(root,'Test','program')
             apply.assert_not_called()
             self.assertFalse((root/'conversion.json').exists())
+            self.assertEqual(list((root/'Projects').rglob('conversion.json')),[])
+
+    def test_each_create_ignores_legacy_identity_and_uses_a_fresh_project_and_proof(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);self.package(root)
+            legacy_state='{"project_id":"deleted-old-project","complete":true}'
+            (root/'resolve-state.json').write_text(legacy_state)
+            (root/'conversion.json').write_text('old unreadable conversion state')
+            resolve=Mock();resolve.GetVersionString.return_value='21.2.0.6'
+            pm=resolve.GetProjectManager.return_value
+            pm.GetProjectListInCurrentFolder.return_value=[]
+            with patch('resolve_project.connect',return_value=resolve), \
+                    patch('resolve_compatibility.ensure_compatible',return_value={'passed':True}) as proof, \
+                    patch('resolve_project.apply',side_effect=ValueError('stop after fresh manifest')) as apply:
+                with self.assertRaisesRegex(ValueError,'stop after fresh'):
+                    app_engine.create(root,'Test','program')
+                pm.GetProjectListInCurrentFolder.return_value=['Test']
+                with self.assertRaisesRegex(ValueError,'stop after fresh'):
+                    app_engine.create(root,'Test','program')
+            self.assertEqual(apply.call_count,2);self.assertEqual(proof.call_count,2)
+            manifests=[Path(call.args[0]) for call in apply.call_args_list]
+            self.assertNotEqual(manifests[0].parent,manifests[1].parent)
+            self.assertEqual([Path(call.args[2]) for call in proof.call_args_list],
+                             [path.parent for path in manifests])
+            plans=[json.loads(path.read_text()) for path in manifests]
+            self.assertEqual(plans[0]['name'],'Test');self.assertNotEqual(plans[1]['name'],'Test')
+            self.assertEqual([plan['requested_name'] for plan in plans],['Test','Test'])
+            self.assertTrue(all(path.is_relative_to(root.resolve()/'Projects') for path in manifests))
+            self.assertTrue(all(not (path.parent/'resolve-state.json').exists() for path in manifests))
+            self.assertEqual((root/'resolve-state.json').read_text(),legacy_state)
+            self.assertEqual((root/'conversion.json').read_text(),'old unreadable conversion state')
+            pm.LoadProject.assert_not_called()
 
     def test_review_semantics_change_fingerprint_but_legacy_strict_hash_survives(self):
         xml=b'<xml/>';chosen={'id':'program'};files={};strict={'mix_policy':'strict','transitions':[]}

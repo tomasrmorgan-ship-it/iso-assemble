@@ -1,6 +1,6 @@
-# ISO Assemble 1.4.2
+# ISO Assemble 1.4.3
 
-A standalone Apple Silicon Mac app for ATEM ISO recordings. No Codex, account, separate Python installation, Homebrew or internet connection is needed. Python, FFmpeg and ffprobe are bundled. Connect the drive containing the original recordings before starting.
+Version 1.4.3, build 8. A standalone Apple Silicon Mac app for ATEM ISO recordings. No Codex, account, separate Python installation, Homebrew or internet connection is needed. Python, FFmpeg and ffprobe are bundled. Connect the drive containing the original recordings before starting.
 
 ## Install and choose an output mode
 
@@ -39,15 +39,50 @@ Before your first Resolve conversion:
 
 1. Open Resolve Studio, finish its initial setup and select a local project library. Save any current work.
 2. In **Resolve Preferences → System → General**, set **External scripting using** to **Local** and save the preferences. Restart Resolve if it asks you to.
-3. Keep Resolve open, then return to ISO Assemble and click **Create Resolve Project**. If the app cannot connect, finish Resolve setup and check the Local setting before retrying. No editor is required for shared-audio camera files.
+3. Keep Resolve open, then return to ISO Assemble and click **Create New Resolve Project**. If the app cannot connect, finish Resolve setup and check the Local setting before retrying. No editor is required for shared-audio camera files.
 
 Before assembling the full edit, the app uses two existing camera clips with at least 12 overlapping frames for a small native multicam test. It checks both camera selections, then saves, exports and reimports the test project. Mix review also checks a native Cross Dissolve. An already saved open project is saved and restored around this check; the original ATEM project and media are unchanged. Resolve’s empty Untitled startup project is fine. If an unsaved project contains work, the app asks you to save it in Resolve before retrying.
 
-The results folder contains a `Resolve Compatibility` subfolder with `Compatibility Report.json`, `state.json`, `Proof.fcpxml` and the small `Proof.drp`. The app keeps two owned test projects in the selected Resolve library and reuses a completed report only when the installed version, recording timing, source snapshot and proof code still match. Keep this folder for safe reruns. Conflicting project ownership stops the check.
+Each **Create New Resolve Project** run starts fresh. The app makes a new dated folder with a random suffix under `Projects` inside your selected results folder. It chooses an available Resolve project name if the requested name already exists. Earlier exports, `resolve-state.json` files and compatibility reports are not reused, even when they remain from an older app version or their associated Resolve projects have been deleted.
 
-After a successful check, the app creates your separate full Resolve project and exports **`<project name>.drp` into the results folder you selected**. It reimports that export into an owned verification project, checks the media, multicam selections, audio and any planned transitions, then returns to the edit. This produces a native Resolve DRP, not just XML interchange. Keep the reports with the export.
+The new run folder contains its own `Resolve Compatibility` subfolder with `Compatibility Report.json`, `state.json`, `Proof.fcpxml` and the small `Proof.drp`. The app runs a fresh compatibility proof for that conversion. After successful export verification it removes this run's temporary compatibility and reimport test projects when their ownership identities match, then returns to your finished edit. A cleanup problem is reported and the affected project is preserved. The proof files and reports remain in the run folder; keep them with the new export.
+
+After a successful check, the app creates your separate full Resolve project and exports **`<project name>.drp` into that new run folder**. Use the result path shown by the app to find this run's export. It reimports that export into an owned verification project and checks the media, multicam selections, audio, planned transitions, organized bins and active edit timeline. The check is tied to the exact export's SHA-256, recorded in `validation.json`; a different or changed DRP cannot reuse an earlier verification result. The app then returns to your full project and its edit timeline. This produces a native Resolve DRP, not just XML interchange. Keep the reports with the export.
+
+### Open the finished Resolve edit
+
+The app selects **`<project name>_Edit`**, opens Resolve's **Edit** page and places the playhead at the first actual multicam cut. This avoids opening on black or a long recording gap. Its checks verify the selected timeline's identity, rather than accepting another timeline with a similar name.
+
+The media pool is organized into:
+
+- **01 Edit:** the finished timeline containing the live camera cuts.
+- **02 Multicam:** native multicam clips containing the synchronized angles.
+- **03 Camera Originals:** original camera clips, separated into **Camera 1**, **Camera 2**, and the other camera bins.
+- **04 Audio ISOs:** captured audio sources, including those not chosen as the primary mix.
+- **05 Program Reference:** original program recordings and the preserved reference timeline.
+
+To edit the live camera choices, open the timeline in **01 Edit**. Opening a clip in **02 Multicam** shows its underlying angles rather than the completed cut sequence. Bin organization does not change source files or move unrelated media added to the project.
+
+ISO Assemble can also turn on Resolve's **Multicam** viewer and fit the timeline using **Full Extent Zoom**. It closes **Inspector** so the source viewer has room, and shows the media pool and timeline. These are interface settings, separate from the project file. This optional step needs macOS Accessibility permission for **ISO Assemble** under **System Settings → Privacy & Security → Accessibility**. Allow it only if you want the app to operate those Resolve controls. You can create and verify the DRP without granting it.
+
+After creation, **Open Multicam Viewer** can retry this viewing step. If permission is missing, choose **Open Permission Settings** to allow ISO Assemble, then click **Open Multicam Viewer** again. Choose **Use Manual Steps** to continue without permission. `Viewer Setup.json` records this separate viewing result.
+
+If permission is unavailable or Resolve's controls differ, the app leaves the verified project available and explains how to prepare the view manually. The exported edit remains native and its angles remain editable. Viewer state is not guaranteed to travel with a DRP to another Mac.
+
+Manual viewing steps, checked in Resolve Studio 21.1:
+
+1. Open the **Edit** page. Show **Media Pool** if needed, then open **01 Edit → `<project name>_Edit`**.
+2. Turn off **Inspector** if it is open. On a narrow window, its width can hide the source viewer.
+3. Click **Multicam** beneath the timeline viewer to show the camera-angle grid beside the program picture.
+4. Click **Full Extent Zoom** above the timeline to fit the cut sequence in view.
+
+These controls change the view, not the selected camera angles or audio.
+
+### Premiere creation
 
 **Premiere:** Previously tested with **26.2.2**. Save your work and **quit Premiere before Create**. The app launches Premiere with the generated XML in a new project. After import, use **File → Save As** with the project name and results folder shown by ISO Assemble. The app verifies the native `.prproj` automatically. Open the `<project name>_Edit` sequence and enable Multi-Camera view. Manual Save As remains necessary; the app has no verified external Premiere save bridge.
+
+### Multicam timing and supported events
 
 Project conversion preserves eight named native multicam angles, supported live camera selections, integer timecode timing and recording gaps. Camera media and captured audio ISOs are referenced locally without copying or transcoding. The selected stereo primary audio stays independent of video switching. A separate program-recording reference timeline is retained where available.
 
@@ -65,7 +100,9 @@ Resolve import/save/reopen checks passed historically for every supported rate/m
 
 A narrowly identified delayed source-file rollover record can now be restored to its declared effective time without changing switcher-event order. The scan report identifies that correction. This parser fix does not repair dropped frames, missing media, audio mismatches or ambiguous events. Optional Mix review is a separate, explicit setting.
 
-For project reruns, use the same output folder and name to verify/reuse the same conversion. Changed media, audio selection, conflicting projects or manifests require a new output folder/name. Edited projects are not reset; validation reports differences. Keep generated reports with the project, and save a copy before creative editing if you want the original conversion to remain verifiable.
+To make another Resolve conversion, choose the recording root again or rescan it, select the intended audio, and click **Create New Resolve Project**. Each Create makes a new independent project and a new `Projects` run folder. You do not need to delete earlier exports or clear old conversion state first. Older conversions and creative edits are preserved. A recording changed since scanning must be rescanned before creation; the app does not approve changed media using the old scan.
+
+Keep each run's reports with its DRP. The fresh-project behavior applies to Resolve conversion; the separate camera-file export mode retains the resumable behavior described below.
 
 For camera-file exports, keep the `Attached Audio` job folder, including its mapping, job state and verification reports. An interrupted job can reuse completed outputs only when they match the saved job and pass verification. Changed sources, a different audio choice or conflicting files are refused; choose a fresh destination when prompted. Existing source or unrecognized destination files are never overwritten.
 

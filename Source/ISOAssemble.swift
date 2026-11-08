@@ -32,6 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var scannedOutput = ""
     var successPath: String?
     var logHandle: FileHandle?
+    var viewerButton: NSButton!
+    var viewerProject: String?
+    var viewerBusy = false
+    var viewerReportFolder: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -72,9 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.addArrangedSubview(scroll); scroll.heightAnchor.constraint(equalToConstant: 160).isActive = true; scroll.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         rescan = button("Scan Again", #selector(scanAgain)); rescan.isEnabled = false
         reveal = button("Show Results", #selector(showResults)); reveal.isEnabled = false
-        create = button("Create Resolve Project", #selector(buildProject)); create.bezelStyle = .rounded; create.keyEquivalent = "\r"; create.isEnabled = false
+        create = button("Create New Resolve Project", #selector(buildProject)); create.bezelStyle = .rounded; create.keyEquivalent = "\r"; create.isEnabled = false
         checkMapping = button("Check Audio Mapping", #selector(checkAudioMapping)); checkMapping.isHidden = true; checkMapping.isEnabled = false
-        let buttons = NSStackView(views: [rescan,reveal,checkMapping,create]); buttons.spacing = 12; stack.addArrangedSubview(buttons)
+        viewerButton = button("Open Multicam Viewer", #selector(openMulticamViewer)); viewerButton.isHidden = true
+        let buttons = NSStackView(views: [rescan,reveal,checkMapping,create,viewerButton]); buttons.spacing = 12; stack.addArrangedSubview(buttons)
         footer.font = .systemFont(ofSize: 11); footer.textColor = .secondaryLabelColor; stack.addArrangedSubview(footer); footer.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         targetChanged()
         window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
@@ -92,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !FileManager.default.isExecutableFile(atPath: Bundle.main.resourceURL!.appendingPathComponent("runtime/ffmpeg/bin/ffmpeg").path) { failure("The bundled audio writer is missing. Reinstall ISO Assemble.") }
     }
     func append(_ text: String) { log.textStorage?.append(NSAttributedString(string: text,attributes: [.font:NSFont.monospacedSystemFont(ofSize: 11,weight: .regular)])); log.scrollToEndOfDocument(nil); if let d=text.data(using:.utf8) {try? logHandle?.write(contentsOf:d)} }
-    func busy(_ on: Bool) { choose.isEnabled = !on && hasOutputMode; destination.isEnabled = !on && hasOutputMode; project.isEditable = !on; target.isEnabled = !on; mixReview.isEnabled = !on; audio.isEnabled = !on && !choices.isEmpty; rescan.isEnabled = !on && hasOutputMode && !folder.stringValue.isEmpty; checkMapping.isEnabled = !on && isAudioMode && !scannedOutput.isEmpty && audio.indexOfSelectedItem > 0; create.isEnabled = !on && hasOutputMode && !scannedOutput.isEmpty && (!isAudioMode || audioPlanReady); if on {progress.startAnimation(nil)} else {progress.stopAnimation(nil)} }
+    func busy(_ processing: Bool) { let on = processing || viewerBusy; viewerButton?.isEnabled = !on && !viewerBusy; choose.isEnabled = !on && hasOutputMode; destination.isEnabled = !on && hasOutputMode; project.isEditable = !on; target.isEnabled = !on; mixReview.isEnabled = !on; audio.isEnabled = !on && !choices.isEmpty; rescan.isEnabled = !on && hasOutputMode && !folder.stringValue.isEmpty; checkMapping.isEnabled = !on && isAudioMode && !scannedOutput.isEmpty && audio.indexOfSelectedItem > 0; create.isEnabled = !on && hasOutputMode && !scannedOutput.isEmpty && (!isAudioMode || audioPlanReady); if on {progress.startAnimation(nil)} else {progress.stopAnimation(nil)} }
     func failure(_ message: String) { let first=String(message.split(separator:"\n",omittingEmptySubsequences:true).first ?? "Operation stopped."); status.stringValue = String(first.prefix(260)) + (first.count > 260 ? "… See the log for details." : ""); status.textColor = .systemRed; append("\n"+message+"\n") }
     @objc func pickFolder() {
         let p=NSOpenPanel(); p.canChooseDirectories=true; p.canChooseFiles=false; p.prompt="Scan Recording"; p.message=isAudioMode ? "Choose the recording root containing Video ISO Files and Audio Source Files. No ATEM project is required." : "Choose the root folder containing your ATEM project, Video ISO Files and Audio Source Files."
@@ -105,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func scanAgain() {
         guard hasOutputMode && !folder.stringValue.isEmpty && !output.stringValue.isEmpty else {return}
         premiereTimer?.invalidate(); pendingPremiere=nil
-        scannedOutput=""; choices=[]; audioPlanReady=false; plannedAudio=nil; audio.removeAllItems(); audio.addItem(withTitle:"Scanning…"); successPath=nil; reveal.isEnabled=false
+        scannedOutput=""; choices=[]; audioPlanReady=false; plannedAudio=nil; audio.removeAllItems(); audio.addItem(withTitle:"Scanning…"); successPath=nil; reveal.isEnabled=false; viewerProject=nil; viewerButton.isHidden=true
         log.string=""; status.textColor = .labelColor; summary.stringValue="Checking source files and recording boundaries…"
         var args=[isAudioMode ? "audio-scan" : "scan","--root",folder.stringValue,"--output",output.stringValue]
         if !isAudioMode, let selected=selectedATEM {args += ["--project",selected]}
@@ -155,7 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func targetChanged() {
         if hasOutputMode {UserDefaults.standard.set(outputModeKeys[target.indexOfSelectedItem],forKey:"ISOAssembleOutputMode")}
         else {UserDefaults.standard.removeObject(forKey:"ISOAssembleOutputMode")}
-        create.title = !hasOutputMode ? "Create" : (isAudioMode ? "Create Camera Files" : (target.indexOfSelectedItem == 0 ? "Create Resolve Project" : "Create Premiere Project"))
+        create.title = !hasOutputMode ? "Create" : (isAudioMode ? "Create Camera Files" : (target.indexOfSelectedItem == 0 ? "Create New Resolve Project" : "Create Premiere Project"))
         create.keyEquivalent = isAudioMode || !hasOutputMode ? "" : "\r"
         checkMapping.isHidden = !isAudioMode; projectViews.forEach {$0.isHidden = isAudioMode || !hasOutputMode}
         mixReview.isHidden = target.indexOfSelectedItem != 0; mixNote.isHidden = mixReview.isHidden
@@ -211,17 +216,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if type=="project_choices" {pendingProjectChoices=e["paths"] as? [String]}
             if type=="progress" {status.stringValue=e["message"] as? String ?? "Working…";append(status.stringValue+"\n")}
             if type=="error" {failure(e["message"] as? String ?? "Unknown error")}
-            if type=="scanned" {scannedOutput=e["output"] as? String ?? "";audio.removeAllItems();audio.addItem(withTitle:"Choose primary audio…");choices=[];for c in e["choices"] as? [[String:String]] ?? [] {choices.append(c["id"]!);audio.addItem(withTitle:c["label"]!)};summary.stringValue="\(e["frameRate"] ?? "")  ·  \(e["cameras"] ?? 0) cameras  ·  \(e["clips"] ?? 0) ISO clips  ·  \(e["audioISOs"] ?? 0) audio ISOs  ·  \(e["cuts"] ?? 0) live cuts";status.stringValue="Scan complete. Choose primary audio, then create your editing project.";for w in e["warnings"] as? [String] ?? [] {append("Timing note: "+w+"\n")};reveal.isEnabled=true}
+            if type=="scanned" {scannedOutput=e["output"] as? String ?? "";audio.removeAllItems();audio.addItem(withTitle:"Choose primary audio…");choices=[];for c in e["choices"] as? [[String:String]] ?? [] {choices.append(c["id"]!);audio.addItem(withTitle:c["label"]!)};summary.stringValue="\(e["frameRate"] ?? "")  ·  \(e["cameras"] ?? 0) cameras  ·  \(e["clips"] ?? 0) ISO clips  ·  \(e["audioISOs"] ?? 0) audio ISOs  ·  \(e["cuts"] ?? 0) live cuts";status.stringValue="Scan complete. Choose primary audio. Create makes a fresh project every time.";for w in e["warnings"] as? [String] ?? [] {append("Timing note: "+w+"\n")};reveal.isEnabled=true}
             if type=="audio_scanned" {scannedOutput=e["output"] as? String ?? "";audio.removeAllItems();audio.addItem(withTitle:"Choose primary audio…");choices=[];for c in e["choices"] as? [[String:String]] ?? [] {if let id=c["id"],let label=c["label"] {choices.append(id);audio.addItem(withTitle:label)}};summary.stringValue="\(e["cameras"] ?? 0) cameras  ·  \(e["clips"] ?? 0) ISO clips  ·  \(e["audioISOs"] ?? 0) audio ISOs";status.stringValue="Choose the WAV source to attach to every camera, then Check Audio Mapping."}
             if type=="audio_plan" {plannedAudio=e["source"] as? String;audioPlanReady=plannedAudio != nil;summary.stringValue=e["summary"] as? String ?? "Audio mapping checked.";status.stringValue="Mapping passed. Create Camera Files will write and verify new MOVs. Existing files stay untouched.";append((e["details"] as? String ?? "")+"\n");reveal.isEnabled=true}
             if type=="premiere_ready" {openPremiere(e)}
-            if type=="complete" {successPath=e["export"] as? String;status.textColor = .systemGreen;status.stringValue=e["message"] as? String ?? "Complete";append("Export: \(successPath ?? "")\nPrimary audio: \(e["audio"] ?? "")\n");reveal.isEnabled=true}
+            if type=="complete" {successPath=e["export"] as? String;status.textColor = .systemGreen;status.stringValue=e["message"] as? String ?? "Complete";append("Export: \(successPath ?? "")\nPrimary audio: \(e["audio"] ?? "")\n");reveal.isEnabled=true
+                if e["prepareViewer"] as? Bool == true, let name=e["project"] as? String {
+                    viewerProject=name;viewerReportFolder=e["output"] as? String ?? successPath.map{URL(fileURLWithPath:$0).deletingLastPathComponent().path};viewerButton.isHidden=false;prepareResolveViewer()
+                }
+            }
+        }
+    }
+    @objc func openMulticamViewer() {
+        guard !viewerBusy, process == nil, viewerProject != nil else {return}
+        if !ResolveViewer.hasAccessibilityPermission {
+            let alert=NSAlert();alert.messageText="Allow ISO Assemble to open the multicam viewer?"
+            alert.informativeText="macOS Accessibility permission lets ISO Assemble click Resolve's viewer controls. Your exported DRP is already saved. Enable ISO Assemble in Privacy & Security → Accessibility, then click Open Multicam Viewer again."
+            alert.addButton(withTitle:"Open Permission Settings");alert.addButton(withTitle:"Use Manual Steps")
+            if alert.runModal() == .alertFirstButtonReturn {ResolveViewer.requestAccessibilityPermission()}
+            else {append(ResolveViewer.manualFallback+"\n")}
+            return
+        }
+        prepareResolveViewer()
+    }
+    func prepareResolveViewer() {
+        guard let name=viewerProject, !viewerBusy else {return}
+        viewerBusy=true;busy(process != nil)
+        ResolveViewer.prepare(expectedProject:name,progress:{self.append($0+"\n")}) { result in
+            self.viewerBusy=false;self.busy(self.process != nil)
+            self.append(result.message+"\n")
+            let report:[String:Any] = ["project":name,"status":result.status.rawValue,"message":result.message,"controls":result.controlStates,"visually_verified":result.visuallyVerified,"manual_steps":result.manualFallback]
+            if let data=try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]) {
+                try? data.write(to:URL(fileURLWithPath:self.viewerReportFolder ?? self.scannedOutput).appendingPathComponent("Viewer Setup.json"),options:.atomic)
+            }
+            if result.status == .ready {
+                self.status.stringValue="DRP saved. The finished edit and multicam viewer are open."
+                self.status.textColor = .systemGreen
+            } else {
+                self.status.stringValue="DRP saved; cut timeline ready. Open Multicam Viewer to finish viewer setup."
+                self.status.textColor = .labelColor
+                self.append(result.manualFallback+"\n")
+                if result.status == .needsPermission {
+                    NSRunningApplication.runningApplications(withBundleIdentifier:"com.blackmagic-design.DaVinciResolve").first?.activate(options:[.activateIgnoringOtherApps])
+                }
+            }
         }
     }
     @objc func showResults() {if let path=successPath {NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath:path)])} else {NSWorkspace.shared.open(URL(fileURLWithPath:output.stringValue))}}
     @objc func about() {let a=NSAlert();a.messageText="ISO Assemble";let version=Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "";a.informativeText="ATEM multicam projects and camera files with shared audio.\nVersion \(version) • Apple Silicon\nNo Codex account, plugin or service required.";a.runModal()}
-    func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply {if process != nil {let a=NSAlert();a.messageText="An operation is running";a.informativeText="Let this operation finish before quitting so files can be saved and verified.";a.runModal();return .terminateCancel};return .terminateNow}
+    func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply {if process != nil || viewerBusy {let a=NSAlert();a.messageText="An operation is running";a.informativeText="Let this operation finish before quitting so files can be saved and verified.";a.runModal();return .terminateCancel};return .terminateNow}
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{return true}
 }
-let app=NSApplication.shared
-let delegate=AppDelegate();app.delegate=delegate;app.run()
+@main
+enum ISOAssembleMain {
+    static func main() {
+        let app=NSApplication.shared
+        let delegate=AppDelegate();app.delegate=delegate;app.run()
+    }
+}
