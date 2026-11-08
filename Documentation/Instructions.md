@@ -1,6 +1,6 @@
-# ISO Assemble 1.4.4
+# ISO Assemble 1.4.5
 
-Version 1.4.4, build 9. A standalone Apple Silicon Mac app for ATEM ISO recordings. No Codex, account, separate Python installation, Homebrew or internet connection is needed. Python, FFmpeg and ffprobe are bundled. Connect the drive containing the original recordings before starting.
+Version 1.4.5, build 10. A standalone Apple Silicon Mac app for ATEM ISO recordings. No Codex, account, separate Python installation, Homebrew or internet connection is needed. Python, FFmpeg and ffprobe are bundled. Connect the drive containing the original recordings before starting.
 
 ## Install and choose an output mode
 
@@ -57,7 +57,7 @@ Before exporting, the app verifies that A1 contains exactly the selected files a
 
 After opening the finished edit, play a representative section to confirm that the chosen source contains the sound you intended. Structural checks cannot establish the recorded signal's loudness or your speaker/headphone routing. Use video-only multicam switching when changing camera angles so the independent mix stays intact.
 
-If an older result has no audio, keep that project and create a fresh conversion with 1.4.4 after selecting the intended source. Each Create uses a new project and run folder; it does not patch your older creative edit. Keep the new `conversion.json` and `validation.json` reports with the DRP if an error needs investigation.
+If an older result has no audio, keep that project and create a fresh conversion with the current version after selecting the intended source. Each Create uses a new project and run folder; it does not patch your older creative edit. Keep the new `conversion.json` and `validation.json` reports with the DRP if an error needs investigation.
 
 ### Open the finished Resolve edit
 
@@ -73,18 +73,20 @@ The media pool is organized into:
 
 To edit the live camera choices, open the timeline in **01 Edit**. Opening a clip in **02 Multicam** shows its underlying angles rather than the completed cut sequence. Bin organization does not change source files or move unrelated media added to the project.
 
-ISO Assemble can also turn on Resolve's **Multicam** viewer and fit the timeline using **Full Extent Zoom**. It closes **Inspector** so the source viewer has room, and shows the media pool and timeline. These are interface settings, separate from the project file. This optional step needs macOS Accessibility permission for **ISO Assemble** under **System Settings → Privacy & Security → Accessibility**. Allow it only if you want the app to operate those Resolve controls. You can create and verify the DRP without granting it.
+Version 1.4.5 first fits the **entire edit** into the timeline using **Full Extent Zoom**, the view achieved manually with **Shift-Z**. This zooms the view only: it does not combine cuts, move clips, shorten the timeline or remove recording gaps. A long gap can make the recorded sections look small because the whole timeline is visible.
 
-After creation, **Open Multicam Viewer** can retry this viewing step. If permission is missing, choose **Open Permission Settings** to allow ISO Assemble, then click **Open Multicam Viewer** again. Choose **Use Manual Steps** to continue without permission. `Viewer Setup.json` records this separate viewing result.
+Automatic view setup needs macOS **Accessibility** permission for **ISO Assemble**. Click **Enable Automatic View**, then allow ISO Assemble under **System Settings → Privacy & Security → Accessibility**. This is a one-time permission step; when you return to the app after granting it, the app retries the view setup. Future successful Create runs attempt the same setup automatically. Creation does not prompt for permission automatically, and project creation/export verification work without it. Without permission, use the manual steps below.
 
-If permission is unavailable or Resolve's controls differ, the app leaves the verified project available and explains how to prepare the view manually. The exported edit remains native and its angles remain editable. Viewer state is not guaranteed to travel with a DRP to another Mac.
+After creation, **Show Entire Edit** retries for the project the app just created. If the timeline is already fitted, repeating the action leaves it fitted. After the fit, the app tries to prepare the **Multicam** viewer, turn off **Inspector** so the source viewer has room, show Media Pool, and select video-only switching. A successful timeline fit is preserved even if one of these optional controls is unavailable. `Viewer Setup.json` records the separate viewing result.
+
+The exported edit remains native and its angles remain editable if permission is unavailable or Resolve's controls differ. Viewer state is not guaranteed to travel with a DRP to another Mac. The app's button works with its most recently created project; it is not an arbitrary-project picker. To use the updated automatic flow, replace the app and follow the normal fresh Create workflow. An older finished edit can be fitted manually without recreating it.
 
 Manual viewing steps, checked in Resolve Studio 21.1:
 
 1. Open the **Edit** page. Show **Media Pool** if needed, then open **01 Edit → `<project name>_Edit`**.
-2. Turn off **Inspector** if it is open. On a narrow window, its width can hide the source viewer.
-3. Click **Multicam** beneath the timeline viewer to show the camera-angle grid beside the program picture.
-4. Click **Full Extent Zoom** above the timeline to fit the cut sequence in view.
+2. Focus the timeline and press **Shift-Z**, or click **Full Extent Zoom** above it, to show the entire edit. If it is already fitted, leave it as it is; the shortcut toggles the view.
+3. Turn off **Inspector** if it is open. On a narrow window, its width can hide the source viewer.
+4. Click **Multicam** beneath the timeline viewer to show the camera-angle grid beside the program picture. Use video-only switching to keep the independent mix intact.
 
 These controls change the view, not the selected camera angles or audio.
 

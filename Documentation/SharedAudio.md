@@ -1,6 +1,6 @@
 # Camera files with shared audio
 
-This mode, introduced in ISO Assemble 1.4 and included in 1.4.4, puts one chosen ATEM audio source on every camera angle. It writes new MOV files containing each camera's unchanged compressed video, original timecode and the selected WAV audio as 24-bit PCM. It does not need Resolve, Premiere or a DRP. Version 1.4.4's Resolve timeline-audio change is separate from this camera-file mode; its mapping and output contract remain the same.
+This mode, introduced in ISO Assemble 1.4 and included in 1.4.5, puts one chosen ATEM audio source on every camera angle. It writes new MOV files containing each camera's unchanged compressed video, original timecode and the selected WAV audio as 24-bit PCM. It does not need Resolve, Premiere or a DRP. The Resolve audio and timeline-view changes in versions 1.4.4 and 1.4.5 are separate from this camera-file mode; its mapping and output contract remain the same.
 
 ## Choose the folder and audio source
 

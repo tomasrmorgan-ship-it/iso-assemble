@@ -1,6 +1,18 @@
 # Validation and limitations
 
-## Version 1.4.4: primary audio imported with the multicam edit
+## Version 1.4.5: show the entire edit automatically
+
+Version **1.4.5 (build 10)** changes Resolve view preparation. The helper fits the full timeline first, before optional Multicam controls, and preserves a successful fit if an optional control cannot be prepared. It reads the current **Full Extent Zoom** state so repeated runs do not toggle a fitted view back to a close-up. Shift-Z provides the equivalent manual view change; it does not change cuts, media, audio or recording gaps.
+
+The app attempts view setup after each successful Create. **Enable Automatic View** provides the explicit one-time Accessibility permission action, and the app retries on return after permission is granted. **Show Entire Edit** retries for the app's most recently created project. Creation does not request permission automatically. No automatic fitting is promised without permission; the saved and verified DRP remains available with manual instructions.
+
+`Source/test-viewer.sh` compiled the actual Swift helper and passed its tests for partial-fit reporting, unknown/false fit states and an empty expected-project failure delivered asynchronously on the main thread exactly once. The real Accessibility-denied path returned `needsPermission` with no progress callbacks, control states, claimed fit or permission prompt. Full Extent Zoom is the only required fit control; the Timeline source-viewer selector is optional so a hidden source panel cannot block fitting the edit.
+
+Inside **Resolve Studio 21.1.1.10**, desktop automation clicked the actual zoom controls. Detail Zoom showed only the first session; Full Extent Zoom visibly showed both sessions and the recording gap. With Single Viewer Mode enabled, the Video Only control was absent while Full Extent Zoom remained available. Dual-viewer mode was restored afterward. This validates the Resolve control's behavior separately from the app helper.
+
+**The permission-granted bundled app helper was not tested.** The permission-denied and control-state checks above do not establish a complete permission-granted automatic workflow. The 244 passing source tests and native conversion/audio results below belong to 1.4.4. No Resolve 21.2, second-machine or arbitrary-existing-project automation coverage is claimed. This patch changes viewing behavior, not the conversion or audio assembly.
+
+## Version 1.4.4: historical primary-audio import checks
 
 Version **1.4.4 (build 9)** changes the Resolve audio-assembly route. The selected primary audio is embedded in the initial FCPXML timeline import as an independent stereo A1 track. Version 1.4.3 imported the video edit first and added the audio afterward. A report of missing audio prompted this change; without the affected exported project or its logs, the exact cause of that particular result remains unconfirmed.
 

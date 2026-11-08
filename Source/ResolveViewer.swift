@@ -16,6 +16,10 @@ struct ResolveViewerResult {
     let controlStates: [String: Bool]
     /// Accessibility readback is not a visual inspection of the angle grid.
     let visuallyVerified = false
+    /// Fit state is read again after pane changes, including partial failures.
+    var timelineFitted: Bool {
+        controlStates["Full Extent Zoom"] == true
+    }
     var manualFallback: String { ResolveViewer.manualFallback }
 }
 
@@ -24,16 +28,18 @@ struct ResolveViewerResult {
 /// project, and its result is independent of the completed DRP export.
 enum ResolveViewer {
     static var hasAccessibilityPermission: Bool { AXIsProcessTrusted() }
-    static let manualFallback = "In the intended project's Edit page, select Timeline, hide Inspector, enable Multicam beneath the viewer, choose Video Only to keep the independent audio mix, use Full Extent Zoom above the timeline, and show Media Pool. If only the program viewer remains, turn off Single Viewer Mode in Resolve's Workspace menu."
+    static let manualFallback = "In the intended project's Edit page, use Full Extent Zoom above the timeline (Shift+Z) to fit all recording sessions and their real gaps. This changes the view, not the edit. For the camera grid, select Timeline, hide Inspector, enable Multicam beneath the viewer, choose Video Only to keep the independent audio mix, and show Media Pool. If only the program viewer remains, turn off Single Viewer Mode in Resolve's Workspace menu."
 
     private static let bundleID = "com.blackmagic-design.DaVinciResolve"
     private static let queue = DispatchQueue(label: "org.isoassemble.resolve-viewer", qos: .userInitiated)
-    private static let desiredStates: [(String, Bool)] = [
+    private static let fitStates: [(String, Bool)] = [
+        ("Full Extent Zoom", true)
+    ]
+    private static let viewerStates: [(String, Bool)] = [
         ("Timeline", true),
         ("Inspector", false),
         ("Multicam", true),
         ("Video Only", true),
-        ("Full Extent Zoom", true),
         ("Media Pool", true)
     ]
 
@@ -88,7 +94,7 @@ enum ResolveViewer {
         }
         guard AXIsProcessTrusted() else {
             return ResolveViewerResult(status: .needsPermission,
-                message: "Automatic viewer preparation needs Accessibility permission for ISO Assemble in System Settings → Privacy & Security → Accessibility. Enable it and retry, or prepare the viewer manually. " + manualFallback,
+                message: "Automatic timeline fitting and viewer setup need Accessibility permission for ISO Assemble. Allow it once in System Settings → Privacy & Security → Accessibility, then retry. The exported edit is already saved. " + manualFallback,
                 controlStates: states)
         }
         let running = onMain {
@@ -104,35 +110,30 @@ enum ResolveViewer {
         AXUIElementSetMessagingTimeout(application, 0.35)
         let context = Context(app: app, application: application,
                               expectedProject: project, deadline: now + 32)
+        // Optional viewer controls cannot consume the final fit-readback budget.
+        let viewerContext = Context(app: app, application: application,
+                                    expectedProject: project, deadline: context.deadline - 6)
         do {
-            progress("Preparing Resolve's multicam viewer controls…")
+            progress("Fitting the full Resolve timeline before preparing the multicam viewer…")
             guard onMain({ app.activate(options: [.activateIgnoringOtherApps]) }) else {
                 throw Stop.unavailable("Resolve could not be activated. Open the intended project's Edit page and retry.")
             }
             try waitForActivation(context)
             _ = try currentWindow(context)
-            for (label, desired) in desiredStates {
-                let control = try waitForControl(label, context: context, deadline: min(now + 5, context.deadline))
-                if label == "Video Only" && booleanAttribute(control, kAXEnabledAttribute) != true {
-                    throw Stop.unavailable("The multicam source-viewer controls are not enabled. Hide Inspector and turn off Single Viewer Mode, then retry. " + manualFallback)
-                }
-                guard let value = checkboxValue(control) else {
-                    throw Stop.failed("The state of Resolve's \(label) control could not be read.")
-                }
-                states[label] = value
-                if value != desired {
-                    progress(desired ? "Enabling \(label)…" : "Hiding \(label)…")
-                    try click(control, label: label, context: context)
-                    try waitForValue(label, desired: desired, context: context, states: &states)
-                    // Give Qt time to finish pane changes before finding the next control.
-                    Thread.sleep(forTimeInterval: 0.18)
-                    _ = try currentWindow(context)
-                }
+            // Only Full Extent Zoom is required. The Timeline checkbox belongs
+            // to the source viewer and can be absent in Single Viewer Mode.
+            for (label, desired) in fitStates {
+                try ensureState(label, desired: desired, context: context,
+                                states: &states, progress: progress)
+            }
+            for (label, desired) in viewerStates {
+                try ensureState(label, desired: desired, context: viewerContext,
+                                states: &states, progress: progress)
             }
             // Later pane changes can affect earlier controls. Read all states
             // again rather than treating a posted mouse click as success.
-            for (label, desired) in desiredStates {
-                let control = try waitForControl(label, context: context, deadline: min(now + 2, context.deadline))
+            for (label, desired) in viewerStates {
+                let control = try waitForControl(label, context: viewerContext, deadline: min(now + 2, viewerContext.deadline))
                 if label == "Video Only" && booleanAttribute(control, kAXEnabledAttribute) != true {
                     throw Stop.unavailable("The multicam source-viewer controls are no longer enabled. " + manualFallback)
                 }
@@ -144,11 +145,22 @@ enum ResolveViewer {
                     throw Stop.failed("Resolve changed its \(label) control while preparing the layout. Use the manual viewer steps or retry.")
                 }
             }
+            // Pane widths may have changed. Reconfirm fit after those changes,
+            // without toggling a control that is already on.
+            for (label, desired) in fitStates {
+                try ensureState(label, desired: desired, context: context,
+                                states: &states, progress: progress)
+            }
+            try readFitState(context, states: &states)
+            guard states["Full Extent Zoom"] == true else {
+                throw Stop.failed("Resolve did not retain Full Extent Zoom after preparing the viewer.")
+            }
             _ = try currentWindow(context)
             return ResolveViewerResult(status: .ready,
                 message: "Viewer control states are confirmed: Timeline, Multicam, Video Only, Full Extent Zoom and Media Pool are on; Inspector is off. The Video Only source-viewer control is enabled. Visual appearance has not been inspected.",
                 controlStates: states)
         } catch let error as Stop {
+            refreshFitAfterFailure(context, states: &states)
             switch error {
             case .unavailable(let message):
                 return ResolveViewerResult(status: .unavailable, message: message, controlStates: states)
@@ -158,8 +170,53 @@ enum ResolveViewer {
                 return ResolveViewerResult(status: .failed, message: message, controlStates: states)
             }
         } catch {
+            refreshFitAfterFailure(context, states: &states)
             return ResolveViewerResult(status: .failed,
                 message: "Viewer preparation stopped: \(error.localizedDescription)", controlStates: states)
+        }
+    }
+
+    private static func ensureState(_ label: String, desired: Bool, context: Context,
+                                    states: inout [String: Bool], progress: (String) -> Void) throws {
+        let control = try waitForControl(label, context: context, deadline: min(now + 5, context.deadline))
+        if label == "Video Only" && booleanAttribute(control, kAXEnabledAttribute) != true {
+            throw Stop.unavailable("The multicam source-viewer controls are not enabled. Hide Inspector and turn off Single Viewer Mode, then retry. " + manualFallback)
+        }
+        guard let value = checkboxValue(control) else {
+            throw Stop.failed("The state of Resolve's \(label) control could not be read.")
+        }
+        states[label] = value
+        if value != desired {
+            progress(desired ? "Enabling \(label)…" : "Hiding \(label)…")
+            try click(control, label: label, context: context)
+            try waitForValue(label, desired: desired, context: context, states: &states)
+            // Give Qt time to finish pane changes before finding the next control.
+            Thread.sleep(forTimeInterval: 0.18)
+            _ = try currentWindow(context)
+        }
+    }
+
+    private static func readFitState(_ context: Context, states: inout [String: Bool]) throws {
+        for (label, _) in fitStates { states.removeValue(forKey: label) }
+        let deadline = min(now + 4, context.deadline)
+        for (label, _) in fitStates {
+            let control = try waitForControl(label, context: context, deadline: deadline)
+            guard let value = checkboxValue(control) else {
+                throw Stop.failed("Resolve's \(label) state could not be confirmed after preparing the layout.")
+            }
+            states[label] = value
+        }
+        _ = try currentWindow(context)
+    }
+
+    private static func refreshFitAfterFailure(_ context: Context, states: inout [String: Bool]) {
+        // Read only: do not post more clicks after an optional control fails.
+        // The same project/frontmost/permission guards still apply. If readback
+        // is unsafe or times out, omit fit state instead of claiming old data.
+        do {
+            try readFitState(context, states: &states)
+        } catch {
+            for (label, _) in fitStates { states.removeValue(forKey: label) }
         }
     }
 

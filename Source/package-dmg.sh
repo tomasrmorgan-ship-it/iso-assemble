@@ -6,8 +6,8 @@ DMG_PATH="${2:?DMG output path required}"
 README_PATH="${3:?User read-me path required}"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_DIR/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_DIR/Contents/Info.plist")"
-if [[ "$VERSION" != 1.4.4 || "$BUILD" != 9 ]]; then
-  printf 'Expected ISO Assemble 1.4.4 build 9; found %s build %s. Build the current app before packaging.\n' "$VERSION" "$BUILD" >&2
+if [[ "$VERSION" != 1.4.5 || "$BUILD" != 10 ]]; then
+  printf 'Expected ISO Assemble 1.4.5 build 10; found %s build %s. Build the current app before packaging.\n' "$VERSION" "$BUILD" >&2
   exit 2
 fi
 python3 "$SOURCE_DIR/package_runtimes.py" --verify --app "$APP_DIR"
@@ -33,5 +33,5 @@ if [[ -f "$DOC_DIR/SharedAudio.md" ]]; then
 fi
 ln -s /Applications "$STAGING/Applications"
 mkdir -p "$(dirname "$DMG_PATH")"
-hdiutil create -volname 'ISO Assemble 1.4.4' -srcfolder "$STAGING" -format UDZO -ov "$DMG_PATH"
+hdiutil create -volname 'ISO Assemble 1.4.5' -srcfolder "$STAGING" -format UDZO -ov "$DMG_PATH"
 hdiutil verify "$DMG_PATH"
