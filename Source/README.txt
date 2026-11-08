@@ -1,23 +1,53 @@
-ISO Assemble source
+# ISO Assemble 1.4.2 source
 
-Swift/AppKit desktop application with a local Python conversion engine. See the included user instructions and validation report for supported versions and current Premiere limitations.
+Swift/AppKit desktop application with a local Python engine. Version 1.4 added **Camera files with shared audio** alongside the existing Resolve and Premiere multicam-project modes. Version 1.4.1 added an explicit first output choice, verified MP4-reference-to-MOV relinking, exact WAV-to-camera-part mapping and an opt-in Resolve Mix review mode. Version 1.4.2 (build 7) replaces the exact Resolve version whitelist with minimum-version checks and a native compatibility proof on the installed editor. Read the included user instructions and validation report for the actual test coverage and editor restrictions.
 
-Rebuild
+## Rebuild
 
-Requires Apple's command-line build tools and make. Runtime source archives are distributed inside the app under Contents/Resources/Legal.
+Requires Apple's command-line build tools and make. Runtime source archives are distributed inside the app under `Contents/Resources/Legal`.
 
-1. Copy Python-3.11.16.tar.xz, ffmpeg-8.1.3.tar.xz, and build-runtimes.sh into a build/vendor folder.
-2. Run bash build/vendor/build-runtimes.sh. This compiles Python and a minimal LGPL shared-library ffprobe with network support disabled. No OpenSSL, Homebrew, pip, or third-party Python modules are required at runtime.
-3. Run VENDOR_DIR=/absolute/build/vendor bash build.sh /absolute/output/ISO\ Assemble.app. The packager relocates Mach-O dependencies, rejects unbundled non-system libraries, includes complete source/license archives and ad-hoc signs the app. Existing bundled runtimes are reused; delete only your build output to force a clean bundle.
-4. Run the bundled Python in engine with -m unittest discover -v.
-5. For distribution, use sign-and-notarize.sh APP 'Developer ID Application: ...' KEYCHAIN_PROFILE, then package-dmg.sh APP OUTPUT_DMG README. This final signing path is supplied but could not be executed without an installed Developer ID identity and notarytool credentials. It is not claimed tested.
+1. Copy `Python-3.11.16.tar.xz`, `ffmpeg-8.1.3.tar.xz`, and the current `build-runtimes.sh` into a build/vendor folder.
+2. Run `bash build-runtimes.sh /absolute/build/vendor`. This creates `python-runtime` and `ffmpeg-runtime` in that vendor folder. To rebuild only FFmpeg/ffprobe, append `--ffmpeg-only`. The minimal LGPL media runtime is built with network support disabled. The new camera-file mode requires FFmpeg in addition to ffprobe; an older probe-only runtime is insufficient. No OpenSSL, Homebrew, pip or third-party Python modules are required at runtime.
+3. Run `VENDOR_DIR=/absolute/build/vendor bash build.sh /absolute/output/ISO\ Assemble.app`. The packager relocates Mach-O dependencies, rejects unbundled non-system libraries, includes complete source/license archives and ad-hoc signs the app. Use a fresh output app when changing runtime capabilities so an older bundled runtime is not reused.
+4. Run the bundled Python in `engine` with `-B -m unittest discover -v`. The repository form is `python3 -B -m unittest discover -s Source/engine -v`. Four generated-media integration tests are opt-in: set `ATTACH_AUDIO_TEST_FFMPEG=/absolute/path/to/full/ffmpeg` when running the suite. That developer FFmpeg needs fixture-generation encoders and filters intentionally omitted from the app; it is not required to use ISO Assemble.
+5. For distribution, use `sign-and-notarize.sh APP 'Developer ID Application: ...' KEYCHAIN_PROFILE`, then `package-dmg.sh APP OUTPUT_DMG README`. This final signing path is supplied but has not been validated with a Developer ID identity and notarytool credentials.
 
-premiere.py writes supported legacy XMEML, imported by Premiere as native multiclips. verify_premiere.py only reads Premiere's saved native project to verify exact timing and angles; it never modifies the project. Resolve uses the local documented scripting API plus native FCPXML import. No Resolve database is modified.
+## Shared-audio camera files
 
-Premiere launch requires the application to be closed first, preventing an XML file-open event from importing into a user's current project. The user performs Save As into the selected results folder; the app watches and validates the resulting .prproj. No Accessibility permission, Codex service, Adobe plugin or undocumented scripting call is used.
+This path discovers numbered camera MP4 or MOV parts and the selected source's numbered WAVs directly under an ATEM recording root. It must remain independent of DRP parsing, Resolve scripting and Premiere. Media processing uses the bundled FFmpeg locally; source files are never changed.
 
-Unit tests cover parser merging/truncation, recording headers, 29.97 DF minute boundaries throughout a day, source mutation safeguards, audio coverage and Premiere rollover/stereo structure. End-to-end checks and limitations are in the delivered validation report.
+The mapping uses exact rational frame/sample arithmetic and selected WAV lengths. Do not align using BWF `time_reference`, assume matching WAV/video suffixes, round fractional sample boundaries, pad or trim mismatches, sum original camera audio, or guess missing timing. Verify each camera's part set, frame count, frame rate, presentation timing and timecode before reusing a shared mapping. Keep the source video's timing and write a proper output timecode track; a fixed 30000 track timescale is appropriate only for the corresponding source time base.
 
-License
+The implementation uses FFmpeg's documented [sample-based atrim filter](https://ffmpeg.org/ffmpeg-filters.html#atrim) and [MOV muxer options](https://ffmpeg.org/ffmpeg-formats.html#mov_002c-mp4_002c-ismv). Call FFmpeg with an argument list so filenames and filter parameters are not interpreted by a shell.
 
-ISO Assemble application code is MIT licensed; see LICENSE. Bundled Python and FFmpeg retain their respective PSF and LGPL licenses and complete sources under the app’s Contents/Resources/Legal. Camera labels are read from each user’s ATEM project, not hardcoded to a particular production.
+The accepted source video is progressive H.264 at a supported constant rate; the original raster is preserved. Source WAVs must be signed 24-bit PCM, 48 kHz and stereo. Each output contains stream-copied video and one selected audio stream encoded as 24-bit PCM. Output verification must compare compressed video payload, exact decoded PCM sample content and count, frame count and timecode with the mapped source ranges. These checks detect transfer or mapping errors; they do not establish whether a WAV contains the intended microphone or mix.
+
+See [SharedAudio](../Documentation/SharedAudio.md) for the user contract. The local bridge exposes `audio-scan --root ROOT --output OUT`, `audio-plan --root ROOT --audio 'CAM 8' --output OUT`, and `audio-build --output OUT`. Put both bundled `runtime/ffprobe/bin` and `runtime/ffmpeg/bin` on PATH. Outputs and owned job state live in `OUT/Attached Audio`; matching completed outputs can be verified and reused on a safe resume, while changed inputs or conflicting files are refused.
+
+## Multicam project conversion
+
+`premiere.py` writes supported legacy XMEML, imported by Premiere as native multiclips. `verify_premiere.py` only reads Premiere's saved native project to verify exact timing and angles; it never modifies the project. Resolve uses the documented local scripting API plus native FCPXML import. No Resolve database is modified.
+
+`resolve_compatibility.py` gates cut-only creation at Studio 21 or later and Mix review at Studio 21.1 or later. Before the full conversion, it must prove native multicam import, two camera selections, save/export/reimport, and optional transition geometry on the installed Resolve. It needs two different camera clips with at least 12 overlapping frames. These API checks do not claim a UI angle-switch exercise.
+
+Proof artifacts live in `OUT/Resolve Compatibility`: `state.json`, `Compatibility Report.json`, `Proof.fcpxml` and `Proof.drp`. The two project names use a saved owner token: `ISOAssemble_Compat_<token>` and its `_Reopen` partner. Existing project IDs must match saved ownership before replacement. An already named current project is saved and restored by name and ID; restoration failure prevents a successful report or production conversion. The empty unsaved startup placeholder is handled without a Save As modal. An unsaved project containing work is preserved and must be saved by the user before retrying.
+
+A cached result requires matching Resolve numeric/display version, exact rate and DF mode, Mix requirement, source paths/sizes/modification times/timing, and proof-module hash. Never reuse an unrelated project or trust a matching version string as evidence that the proof passed. Compatibility results are separate from full-project validation. Do not turn unit acceptance of a newer version string into a claim that that Resolve release was exercised locally.
+
+Version 1.4.2 passed 132 source tests, including 14 compatibility tests and four opt-in generated-media integration tests. The new automatic native proof and cached repeat passed on local Resolve Studio 21.1.1.10. Resolve 21.2.0.6 has version-gate unit coverage only; its runtime has not been tested locally or remotely.
+
+Premiere launch requires the application to be closed first, preventing an XML file-open event from importing into a user's current project. The user performs Save As into the selected results folder; the app watches and validates the resulting `.prproj`. No Accessibility permission, Codex service, Adobe plugin or undocumented scripting call is used.
+
+The separate ATEM parser correction accepts narrowly identified delayed source-file rollover metadata at its declared effective time while preserving switcher-event order. It does not repair variable/gapped media or otherwise unsupported projects. Project diagnostics report these limits.
+
+MOV relinking is a reference mapping in the conversion plan, not a rewrite of the original DRP. Require a complete verified camera/part set, exact frame duration/rate and source timecode or corroborated rollover timing. Preserve the relink evidence and the limitation that unavailable original MP4 payloads cannot be compared. Project audio mapping can reuse the exact sample-length mapping for verified camera parts; do not let contradictory BWF metadata shift that mapping.
+
+`build(..., mix_policy="strict")` preserves the existing default. Explicit `linear-review` returns original native multicam cuts, a separate transition plan and review warnings/markers. Apply only supported `TimelineItem.AddTransition` options after the installed Resolve Studio passes the 21.1-or-later version gate and the native Mix compatibility proof. Keep each camera cut at the recorded Mix end and verify the left-aligned dissolve interval, adjacent item offsets and incoming source handles. Same-angle endpoints or internal source changes remain unresolved; retain every original source selection. Transition objects must be counted separately from video items. Older 21.0 strict-cut conversion must not call APIs introduced in 21.1.
+
+The bridge persists the policy in `scan.json` and includes reviewed transition semantics in conversion fingerprints. Premiere rejects active Mix data before writing interchange. FCPXML alone contains the multicam cuts; it does not mean the transition plan has been applied. Preserve these boundaries when adding exporters.
+
+The version 1.4 suite passed 62 tests, including all four opt-in generated-media integration tests. Tests cover parser state merging, recording headers, drop-frame timing, source mutation safeguards, exact shared-audio mapping, protected reruns, bridge isolation, audio coverage and Premiere rollover/stereo structure. Separate packaged-runtime checks verified 40 small/short camera MOV outputs, and the native UI completed the 24-output generated fixture. See [validation details](../Documentation/Validation.md); historical editor proofs are not a new full-production conversion test.
+
+## License
+
+ISO Assemble application code is MIT licensed; see LICENSE. Bundled Python and FFmpeg retain their respective PSF and LGPL licenses and complete sources under the app's `Contents/Resources/Legal`. Camera labels are read from each user's ATEM project, not hardcoded to a particular production.

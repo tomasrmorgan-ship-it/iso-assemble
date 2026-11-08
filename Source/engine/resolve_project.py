@@ -18,12 +18,19 @@ def clips(folder):
  yield from folder.GetClipList()
  for f in folder.GetSubFolderList():yield from clips(f)
 
+def item_type(item):
+ method=getattr(item,'GetType',None)
+ return method() if callable(method) else 'video'
+
+def video_items(t):
+ return [x for x in (t.GetItemListInTrack('video',1) or []) if item_type(x)=='video']
+
 def validate(t,plan):
  timing=Timing.from_plan(plan)
  actual_rate=str(t.GetSetting('timelineFrameRate')).split()[0]
  if Fraction(actual_rate)!=Fraction(timing.resolve_rate):raise RuntimeError(f'Resolve timeline rate mismatch: {actual_rate}')
  if timing.frames(t.GetStartTimecode())!=plan['origin']%timing.day:raise RuntimeError('Resolve timeline timecode origin or DF/NDF mismatch')
- actual=t.GetItemListInTrack('video',1);expected=[c for c in plan['cuts'] if c['angle'] not in (None,0)]
+ actual=video_items(t);expected=[c for c in plan['cuts'] if c['angle'] not in (None,0)]
  if len(actual)!=len(expected):raise RuntimeError(f'Video item count {len(actual)} != {len(expected)}')
  for i,(item,cut) in enumerate(zip(actual,expected)):
   session=plan['sessions'][cut['session']];name=f'{session["multicam_name"]} - {cut["angle"]} {plan["camera_names"][str(cut["angle"])]}'
@@ -31,6 +38,62 @@ def validate(t,plan):
   if not m or m.GetClipProperty('Type')!='Multicam':raise RuntimeError(f'Item {i} is not native multicam')
   if (item.GetStart(),item.GetEnd(),item.GetName(),item.GetLeftOffset())!=(cut['start'],cut['end'],name,cut['start']-session['start']):raise RuntimeError(f'Cut {i} timing/angle differs: {item.GetName()}')
  return len(actual)
+
+def transition_inventory(t,plan,complete=False):
+ expected={(x['start'],x['end']):x for x in plan.get('transitions',[]) if not x.get('unresolved')}
+ if len(expected)!=sum(not x.get('unresolved') for x in plan.get('transitions',[])):raise RuntimeError('Duplicate planned transition intervals')
+ actual={}
+ for item in (t.GetItemListInTrack('video',1) or []):
+  if item_type(item)!='transition':continue
+  key=(item.GetStart(),item.GetEnd())
+  if key in actual or key not in expected or item.GetName()!='Cross Dissolve' or item.GetDuration()!=expected[key]['duration_frames']:
+   raise RuntimeError('Existing transition differs from this conversion; no automatic replacement is allowed')
+  actual[key]=item
+ if complete and set(actual)!=set(expected):raise RuntimeError('Missing reconstructed Resolve transitions')
+ return actual
+
+def review_marker_data(plan,row):
+ return 'iso-assemble:mix:'+str(row['line'])+':'+str(row['end_line'])
+
+def validate_review_markers(t,plan):
+ markers=t.GetMarkers() or {}
+ for row in plan.get('review_markers',[]):
+  frame=row['frame']-plan['origin'];m=markers.get(frame)
+  if not m or (m.get('name'),m.get('note'),m.get('duration'),m.get('customData'))!=(row['name'],row['note'],row['duration_frames'],review_marker_data(plan,row)):
+   raise RuntimeError('Missing or changed ATEM Mix review marker')
+ return len(plan.get('review_markers',[]))
+
+def apply_transitions(t,plan):
+ """Apply only explicit reviewed Mix plans; preserve every original multicam cut."""
+ if not plan.get('transitions') and not plan.get('review_markers'):
+  transition_inventory(t,plan,complete=True)
+  return 0
+ validate(t,plan)
+ actual=transition_inventory(t,plan)
+ indexed={n:item for (n,_),item in zip(((n,c) for n,c in enumerate(plan['cuts']) if c['angle'] not in (None,0)),video_items(t))}
+ pending=[]
+ for row in plan.get('transitions',[]):
+  if row.get('unresolved'):continue
+  left=indexed[row['from_cut_index']];right=indexed[row['to_cut_index']]
+  a=plan['cuts'][row['from_cut_index']];b=plan['cuts'][row['to_cut_index']]
+  if a['session']!=b['session'] or a['angle']!=row['from_angle'] or b['angle']!=row['to_angle'] or left.GetEnd()!=right.GetStart() or right.GetStart()!=row['end'] or left.GetStart()>row['start'] or right.GetLeftOffset()<row['duration_frames']:
+   raise RuntimeError('Native multicam transition handles or adjacent cuts differ from the verified plan')
+  if not callable(getattr(left,'AddTransition',None)):raise RuntimeError('This Resolve version cannot apply native multicam transitions')
+  if (row['start'],row['end']) not in actual:pending.append((left,row))
+ # Check all collisions before making changes, including markers on a safe rerun.
+ markers=t.GetMarkers() or {}
+ for row in plan.get('review_markers',[]):
+  m=markers.get(row['frame']-plan['origin'])
+  if m and (m.get('name'),m.get('note'),m.get('duration'),m.get('customData'))!=(row['name'],row['note'],row['duration_frames'],review_marker_data(plan,row)):
+   raise RuntimeError('A different marker occupies a required review position; existing marker preserved')
+ for left,row in pending:
+  item=left.AddTransition(row['resolve_options'])
+  if not item or item_type(item)!='transition' or (item.GetStart(),item.GetEnd(),item.GetDuration())!=(row['start'],row['end'],row['duration_frames']):raise RuntimeError('Resolve did not create the exact requested dissolve interval')
+ for row in plan.get('review_markers',[]):
+  frame=row['frame']-plan['origin']
+  if frame not in markers and not t.AddMarker(frame,'Red',row['name'],row['note'],row['duration_frames'],review_marker_data(plan,row)):raise RuntimeError('Could not add required ATEM Mix review marker')
+ validate(t,plan);validate_review_markers(t,plan)
+ return len(transition_inventory(t,plan,complete=True))
 
 def programs(root,timing=None):
  timing=timing or Timing()
@@ -59,6 +122,8 @@ def append_verified(mp,t,m,start,count,kind,track=1):
 
 def apply(plan_path):
  plan_path=Path(plan_path).resolve();out=plan_path.parent;plan=json.loads(plan_path.read_text());timing=Timing.from_plan(plan);name=plan['name'];statefile=out/'resolve-state.json';r=connect();pm=r.GetProjectManager();existing=name in pm.GetProjectListInCurrentFolder()
+ proof=plan.get('resolve_compatibility')
+ if proof and proof.get('resolve_version')!=r.GetVersionString():raise RuntimeError('Resolve changed versions after the compatibility check. Retry Create Project to check the current version before conversion.')
  state=json.loads(statefile.read_text()) if statefile.exists() else None
  if existing and (not state or state.get('fingerprint')!=plan['fingerprint']):raise RuntimeError('Project name already exists without matching conversion state; choose a new project name. No existing project was modified.')
  print(f'Resolve {r.GetVersionString()}: {name}',flush=True)
@@ -75,6 +140,8 @@ def apply(plan_path):
   edit=mp.ImportTimelineFromFile(str(out/(name+'.fcpxml')))
   if not edit:raise RuntimeError('Resolve timeline import failed')
  count=validate(edit,plan);print(f'Validated {count} native multicam cuts',flush=True)
+ transitions=apply_transitions(edit,plan)
+ if transitions:print(f'Applied and verified {transitions} linear dissolves; {len(plan.get("review_markers",[]))} unresolved Mix events marked for review',flush=True)
  pg=programs(plan['media_root'],timing);selected=plan.get('audio',{'selected':'program','label':'ATEM Program Mix','files':pg});
  all_audio=[x['path'] for x in plan.get('audio_inventory',[]) if x['kind']=='audio_iso']
  mp.ImportMedia([x['path'] for x in pg]+all_audio);pool={c.GetClipProperty('File Path'):c for c in clips(mp.GetRootFolder())}
@@ -122,7 +189,7 @@ def apply(plan_path):
   raise RuntimeError('Export destination already exists; refusing to overwrite')
  # Export is only allowed into this conversion-owned directory.
  if not pm.ExportProject(name,str(target)):raise RuntimeError('Resolve project export failed')
- state.update(complete=True,resolve_version=r.GetVersionString(),cuts_verified=count,export=str(target));statefile.write_text(json.dumps(state,indent=2))
+ state.update(complete=True,resolve_version=r.GetVersionString(),cuts_verified=count,transitions_verified=transitions,export=str(target));statefile.write_text(json.dumps(state,indent=2))
  print(f'Exported {target}. Reimport and UI verification remain required.',flush=True)
 
 def main():
