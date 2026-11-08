@@ -5,6 +5,7 @@ from pathlib import Path
 from resolve_project import connect,clips,validate,transition_inventory,validate_review_markers
 
 from project_layout import inspect_project_layout,inspect_edit_session
+from audio_validation import verify_primary_audio
 
 def verify(manifest):
  plan=json.loads(Path(manifest).read_text());r=connect();p=r.GetProjectManager().GetCurrentProject()
@@ -18,15 +19,20 @@ def verify(manifest):
  native={c.GetName():c for c in pool if c.GetClipProperty('Type')=='Multicam'}
  for s in plan['sessions']:
   if s['multicam_name'] not in native or int(native[s['multicam_name']].GetClipProperty('Frames'))!=s['end']-s['start']:raise RuntimeError('Missing or wrong-duration native multicam')
- audio=t.GetItemListInTrack('audio',1);coverage=[(a.GetStart(),a.GetEnd()) for a in audio]
- if coverage!=[(s['start'],s['end']) for s in plan['sessions']]:raise RuntimeError(f'Audio coverage differs: {coverage}')
- if plan.get('audio'):
-  wanted={x['path'] for x in plan['audio']['files']}
-  if any(a.GetMediaPoolItem().GetClipProperty('File Path') not in wanted for a in audio):raise RuntimeError('Wrong primary audio source')
- if t.GetTrackCount('audio')!=1:raise RuntimeError('Unexpected additional audio tracks')
+ primary_audio_validation=None
+ if plan.get('audio_embedded'):
+  primary_audio_validation=verify_primary_audio(t,plan)
+  coverage=[(a.GetStart(),a.GetEnd()) for a in t.GetItemListInTrack('audio',1)]
+ else:
+  audio=t.GetItemListInTrack('audio',1);coverage=[(a.GetStart(),a.GetEnd()) for a in audio]
+  if coverage!=[(s['start'],s['end']) for s in plan['sessions']]:raise RuntimeError(f'Audio coverage differs: {coverage}')
+  if plan.get('audio'):
+   wanted={x['path'] for x in plan['audio']['files']}
+   if any(a.GetMediaPoolItem().GetClipProperty('File Path') not in wanted for a in audio):raise RuntimeError('Wrong primary audio source')
+  if t.GetTrackCount('audio')!=1:raise RuntimeError('Unexpected additional audio tracks')
  layout=inspect_project_layout(p,plan) if plan.get('presentation_revision') else None
  session=inspect_edit_session(p,plan,require_first_cut=True) if plan.get('presentation_revision') else None
- return dict(layout=layout,edit_session=session,resolve=r.GetVersionString(),project=p.GetName(),cuts_verified=count,transitions_verified=transitions,unresolved_mix_markers=reviews,transition_warnings=plan.get('transition_warnings',[]),camera_source_count=len(plan['media']),audio_iso_count=sum(x['kind']=='audio_iso' for x in plan.get('audio_inventory',[])),primary_audio=plan.get('audio',{}).get('selected','program'),all_source_paths_present=True,multicam_names=list(native),audio_coverage=coverage,timelines=list(timelines),note='API checks; independently confirm viewer and angle switching in the UI. Existing media files were verified during preflight.')
+ return dict(primary_audio_validation=primary_audio_validation,layout=layout,edit_session=session,resolve=r.GetVersionString(),project=p.GetName(),cuts_verified=count,transitions_verified=transitions,unresolved_mix_markers=reviews,transition_warnings=plan.get('transition_warnings',[]),camera_source_count=len(plan['media']),audio_iso_count=sum(x['kind']=='audio_iso' for x in plan.get('audio_inventory',[])),primary_audio=plan.get('audio',{}).get('selected','program'),all_source_paths_present=True,multicam_names=list(native),audio_coverage=coverage,timelines=list(timelines),note='API checks; independently confirm viewer and angle switching in the UI. Existing media files were verified during preflight.')
 if __name__=='__main__':
  ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--manifest',required=True);ap.add_argument('--report',required=True);a=ap.parse_args()
  try:

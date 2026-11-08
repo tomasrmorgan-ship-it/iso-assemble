@@ -26,7 +26,7 @@ class MixBridgeTests(unittest.TestCase):
 
     def catalog(self):
         return dict(candidates=[dict(id='program', label='Program', selectable=True,
-                                     files=[dict(path='/tmp/program.mp4', start=1000, end=1300, frames=300)])],
+                                     files=[dict(path='/tmp/program.mp4', start=1000, end=1300, frames=300, channels=2, sample_rate=48000)])],
                     inventory=[], warnings=['Audio warning'])
 
     def scan_with_fixture(self, root, out, data, project, **kwargs):

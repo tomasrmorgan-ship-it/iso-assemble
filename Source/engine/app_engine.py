@@ -88,6 +88,7 @@ def create(out,name,primary):
  from project_layout import select_edit_session
  from export_validation import load_export_for_verification
  from fresh_run import allocate_fresh_run,cleanup_test_projects
+ from audio_timeline import add_primary_audio
  out=Path(out).resolve();package=json.loads((out/'scan.json').read_text());data=package['data'];cat=package['catalog']
  if snapshot(package['snapshot'])!=package['snapshot']:raise ValueError('The recording files changed after scanning. Choose the folder again to rescan before creating the project.')
  if not name.strip() or '/' in name or '\\' in name or name in ('.','..'):raise ValueError('Enter a project name without path separators.')
@@ -111,7 +112,10 @@ def create(out,name,primary):
   source=scan_output/filename
   if source.is_file() and not source.is_symlink():shutil.copy2(source,out/filename)
  emit('progress',message=f'Creating a fresh project: {name}. Previous conversions will not be reused.')
- xml,plan=build(data,name,mix_policy=mix_policy);fingerprint=conversion_fingerprint(xml,chosen,package['snapshot'],plan)
+ xml,plan=build(data,name,mix_policy=mix_policy)
+ plan['audio_inventory']=cat['inventory']
+ xml,plan=add_primary_audio(xml,plan,chosen)
+ fingerprint=conversion_fingerprint(xml,chosen,package['snapshot'],plan)
  plan.update(name=name,input=data['input'],input_sha256=data['sha256'],media_root=package['root'],fingerprint=fingerprint,media=[{k:v for k,v in m.items() if k!='probe'} for m in data['media']],warnings=data['warnings']+cat['warnings']+plan.get('transition_warnings',[]),audio=dict(selected=chosen['id'],label=chosen['label'],files=chosen['files']),audio_inventory=cat['inventory'])
  manifest=out/'conversion.json'
  if manifest.exists() and json.loads(manifest.read_text())['fingerprint']!=fingerprint:raise ValueError('This output folder already contains a different conversion or audio selection. Choose another output folder to preserve it.')
@@ -121,7 +125,7 @@ def create(out,name,primary):
  plan['requested_name']=requested_name
  plan['resolve_compatibility']=compatibility
  manifest.write_text(json.dumps(plan,indent=2));(out/(name+'.fcpxml')).write_bytes(xml)
- emit('progress',message='Creating native multicam clips, reconstructing live cuts, and importing all audio ISOs…')
+ emit('progress',message='Creating native multicam cuts with '+chosen['label']+' already placed on A1…')
  with contextlib.redirect_stdout(sys.stderr):apply(manifest)
  emit('progress',message='Reopening the exported project and verifying native multicam cuts, media and audio…')
  plan=json.loads(manifest.read_text())
@@ -140,13 +144,13 @@ def create(out,name,primary):
  report['final_edit_session']=select_edit_session(r,p,plan)
  if not pm.SaveProject():raise RuntimeError('Resolve could not save the selected edit session')
  (out/'validation.json').write_text(json.dumps(report,indent=2))
- message='Project exported and reopened on the finished cut timeline. Media is organized into bins.'
+ message='Project exported and reopened. '+chosen['label']+' is on A1 beneath the finished multicam edit.'
  status=mix_status(plan)
  if plan.get('transitions'):
   status['transitionStatus']='applied-review-required'
   message=(f'Project created, exported and reopened. {status["linearTransitions"]} linear Mix transitions were reconstructed; '
            f'{status["unresolvedTransitions"]} marked intervals and the original fader curves still need comparison with the program reference.')
- emit('complete',export=str(target),output=str(out),project=name,prepareViewer=True,timeline=name+'_Edit',cuts=report['cuts_verified'],audio=chosen['label'],message=message,**status)
+ emit('complete',export=str(target),output=str(out),project=name,prepareViewer=True,timeline=name+'_Edit',cuts=report['cuts_verified'],audio=chosen['label'],audioClips=(report.get('primary_audio_validation') or {}).get('clips_verified'),message=message,**status)
 
 def premiere_create(out,name,primary):
  from premiere import generate

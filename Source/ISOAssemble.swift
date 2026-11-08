@@ -222,6 +222,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if type=="premiere_ready" {openPremiere(e)}
             if type=="complete" {successPath=e["export"] as? String;status.textColor = .systemGreen;status.stringValue=e["message"] as? String ?? "Complete";append("Export: \(successPath ?? "")\nPrimary audio: \(e["audio"] ?? "")\n");reveal.isEnabled=true
                 if e["prepareViewer"] as? Bool == true, let name=e["project"] as? String {
+                    if let count=e["audioClips"] as? Int, let label=e["audio"] as? String {
+                        audioNote.stringValue="Selected audio: "+label+" • \(count) clips on A1, independent of camera switching."
+                    }
                     viewerProject=name;viewerReportFolder=e["output"] as? String ?? successPath.map{URL(fileURLWithPath:$0).deletingLastPathComponent().path};viewerButton.isHidden=false;prepareResolveViewer()
                 }
             }

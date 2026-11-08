@@ -1,6 +1,6 @@
-# ISO Assemble 1.4.3
+# ISO Assemble 1.4.4
 
-Version 1.4.3, build 8. A standalone Apple Silicon Mac app for ATEM ISO recordings. No Codex, account, separate Python installation, Homebrew or internet connection is needed. Python, FFmpeg and ffprobe are bundled. Connect the drive containing the original recordings before starting.
+Version 1.4.4, build 9. A standalone Apple Silicon Mac app for ATEM ISO recordings. No Codex, account, separate Python installation, Homebrew or internet connection is needed. Python, FFmpeg and ffprobe are bundled. Connect the drive containing the original recordings before starting.
 
 ## Install and choose an output mode
 
@@ -48,6 +48,16 @@ Each **Create New Resolve Project** run starts fresh. The app makes a new dated 
 The new run folder contains its own `Resolve Compatibility` subfolder with `Compatibility Report.json`, `state.json`, `Proof.fcpxml` and the small `Proof.drp`. The app runs a fresh compatibility proof for that conversion. After successful export verification it removes this run's temporary compatibility and reimport test projects when their ownership identities match, then returns to your finished edit. A cleanup problem is reported and the affected project is preserved. The proof files and reports remain in the run folder; keep them with the new export.
 
 After a successful check, the app creates your separate full Resolve project and exports **`<project name>.drp` into that new run folder**. Use the result path shown by the app to find this run's export. It reimports that export into an owned verification project and checks the media, multicam selections, audio, planned transitions, organized bins and active edit timeline. The check is tied to the exact export's SHA-256, recorded in `validation.json`; a different or changed DRP cannot reuse an earlier verification result. The app then returns to your full project and its edit timeline. This produces a native Resolve DRP, not just XML interchange. Keep the reports with the export.
+
+### Verify your chosen audio
+
+Version 1.4.4 imports the chosen audio with the camera edit, onto an independent stereo **A1** track. Choose the source containing your intended mix before Create. For example, selecting `CAM 8` places the captured CAM 8 WAVs beneath the live video cuts; the other captured sources remain available in **04 Audio ISOs**. A single long WAV can continue through several camera-file parts without restarting at each video rollover. Audio is continuous within each recording session; actual recording gaps remain silent.
+
+Before exporting, the app verifies that A1 contains exactly the selected files at the planned timeline positions and offsets within those files. It repeats these checks after reopening the exported DRP. Enabled state and stereo channel assignments are also checked when exposed by the installed Resolve; `validation.json` records which checks ran. Empty A1, missing coverage, an incorrect mix or an invalid channel assignment stops creation with an error. A successful media-pool import alone is insufficient.
+
+After opening the finished edit, play a representative section to confirm that the chosen source contains the sound you intended. Structural checks cannot establish the recorded signal's loudness or your speaker/headphone routing. Use video-only multicam switching when changing camera angles so the independent mix stays intact.
+
+If an older result has no audio, keep that project and create a fresh conversion with 1.4.4 after selecting the intended source. Each Create uses a new project and run folder; it does not patch your older creative edit. Keep the new `conversion.json` and `validation.json` reports with the DRP if an error needs investigation.
 
 ### Open the finished Resolve edit
 
@@ -111,6 +121,8 @@ Automatic project filename-prefix repair is applied only when every referenced c
 When referenced MP4s are missing, project mode can relink to a complete matching MOV set after verifying camera/part identity, rate, exact frame counts and timing. Source timecode must agree, or rollover timing must be corroborated by contiguous camera parts and the program recording. A filename alone is insufficient. Each relink is recorded in the report; the ATEM DRP and MOVs are not rewritten. If the original MP4s are unavailable, their encoded contents cannot be compared with the MOVs. Incomplete, ambiguous or mismatched replacements stop with a readable error.
 
 For captured WAVs, exact sample lengths are matched to the verified camera parts. One WAV may cover several consecutive parts; suffixes need not match. Conflicting BWF clock metadata is reported and is not used to shift an exact-length match. Unmatched, partial or ambiguous coverage is refused. Choose the intended mix by its recorded content; metadata cannot identify what is audible.
+
+Resolve's source-media clock is separate from the WAV's placement in the edit. The app accounts for a WAV's BWF clock when referencing that file inside Resolve, while the verified sample-length mapping determines when it plays. A timestamp that points to a later camera rollover must not delay the WAV or restart it there. The original WAV metadata is not rewritten.
 
 ## Sharing this build
 

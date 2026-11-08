@@ -6,6 +6,8 @@ from fractions import Fraction
 from atem import probe,frames
 from timing import Timing
 from project_layout import organize_project,select_edit_session
+from audio_validation import verify_primary_audio
+from imported_program_spans import verified_program_spans
 
 PRESENTATION_REVISION=1
 
@@ -143,6 +145,9 @@ def apply(plan_path):
   edit=mp.ImportTimelineFromFile(str(out/(name+'.fcpxml')))
   if not edit:raise RuntimeError('Resolve timeline import failed')
  count=validate(edit,plan);print(f'Validated {count} native multicam cuts',flush=True)
+ if plan.get('audio_embedded'):
+  if not p.SetCurrentTimeline(edit) or p.GetCurrentTimeline().GetUniqueId()!=edit.GetUniqueId():raise RuntimeError('Resolve did not activate the imported cut timeline')
+  verify_primary_audio(edit,plan)
  transitions=apply_transitions(edit,plan)
  if transitions:print(f'Applied and verified {transitions} linear dissolves; {len(plan.get("review_markers",[]))} unresolved Mix events marked for review',flush=True)
  pg=programs(plan['media_root'],timing);selected=plan.get('audio',{'selected':'program','label':'ATEM Program Mix','files':pg});
@@ -155,35 +160,40 @@ def apply(plan_path):
  if missing:
   mp.ImportMedia(missing)
   pool={c.GetClipProperty('File Path'):c for c in clips(mp.GetRootFolder())}
-  unresolved=[path for path in missing if path not in pool]
+  plan['program_spans']=verified_program_spans(pg,pool,timing)
+  covered=set(plan['program_spans']['covered_missing_paths'])
+  unresolved=[path for path in missing if path not in pool and path not in covered]
   if unresolved:raise RuntimeError('Resolve did not import the required audio/program media: '+', '.join(unresolved))
- session_media=[]
- selected_files=selected['files']
- for session in plan['sessions']:
-  files=sorted((x for x in selected_files if session['start']<=x['start']<session['end']),key=lambda x:x['start']);cursor=session['start']
-  for f in files:
-   if f['start']!=cursor:raise RuntimeError('Program audio has a gap or overlap')
-   cursor+=f['frames']
-  if cursor!=session['end']:raise RuntimeError('Program audio does not cover recording')
-  # Resolve may automatically span physical files. Account for each source once.
-  cursor=session['start']
-  while cursor<session['end']:
-   f=next(x for x in files if x['start']==cursor);m=pool.get(f['path'])
-   if not m:raise RuntimeError(f'No Resolve source at program boundary {cursor}')
-   n=int(m.GetClipProperty('Frames') or f['frames'])
-   if cursor+n>session['end']:raise RuntimeError('Program span exceeds recording boundary')
-   session_media.append((m,cursor,n));cursor+=n
- if not p.SetCurrentTimeline(edit):raise RuntimeError('Resolve could not open the cut timeline for independent audio')
- audio=edit.GetItemListInTrack('audio',1)
- if audio:
-  if [(a.GetStart(),a.GetEnd()) for a in audio]!=[(s,s+n) for _,s,n in session_media]:raise RuntimeError('Existing audio does not match verified program coverage; stop rather than duplicate')
-  if [a.GetMediaPoolItem().GetClipProperty('File Path') for a in audio]!=[m.GetClipProperty('File Path') for m,_,_ in session_media]:raise RuntimeError('Existing audio uses a different mix; stop rather than replace it')
- else:
-  for m,start,n in session_media:append_verified(mp,edit,m,start,n,2)
+ if not plan.get('audio_embedded'):
+  session_media=[]
+  selected_files=selected['files']
+  for session in plan['sessions']:
+   files=sorted((x for x in selected_files if session['start']<=x['start']<session['end']),key=lambda x:x['start']);cursor=session['start']
+   for f in files:
+    if f['start']!=cursor:raise RuntimeError('Program audio has a gap or overlap')
+    cursor+=f['frames']
+   if cursor!=session['end']:raise RuntimeError('Program audio does not cover recording')
+   # Resolve may automatically span physical files. Account for each source once.
+   cursor=session['start']
+   while cursor<session['end']:
+    f=next(x for x in files if x['start']==cursor);m=pool.get(f['path'])
+    if not m:raise RuntimeError(f'No Resolve source at program boundary {cursor}')
+    n=int(m.GetClipProperty('Frames') or f['frames'])
+    if cursor+n>session['end']:raise RuntimeError('Program span exceeds recording boundary')
+    session_media.append((m,cursor,n));cursor+=n
+  if not p.SetCurrentTimeline(edit):raise RuntimeError('Resolve could not open the cut timeline for independent audio')
+  audio=edit.GetItemListInTrack('audio',1)
+  if audio:
+   if [(a.GetStart(),a.GetEnd()) for a in audio]!=[(s,s+n) for _,s,n in session_media]:raise RuntimeError('Existing audio does not match verified program coverage; stop rather than duplicate')
+   if [a.GetMediaPoolItem().GetClipProperty('File Path') for a in audio]!=[m.GetClipProperty('File Path') for m,_,_ in session_media]:raise RuntimeError('Existing audio uses a different mix; stop rather than replace it')
+  else:
+   for m,start,n in session_media:append_verified(mp,edit,m,start,n,2)
  edit.SetTrackName('audio',1,selected['label']+' - independent stereo')
  reference_name=name+'_Live_Program_Reference'
  if reference_name not in all_t and not any('Original_ATEM_Reference' in n for n in all_t):
-  reference=mp.CreateEmptyTimeline(reference_name);reference.SetStartTimecode(edit.GetStartTimecode())
+  reference=mp.CreateEmptyTimeline(reference_name)
+  if not reference or not reference.SetStartTimecode(edit.GetStartTimecode()):raise RuntimeError('Resolve could not create the program reference timeline')
+  if not p.SetCurrentTimeline(reference) or p.GetCurrentTimeline().GetUniqueId()!=reference.GetUniqueId():raise RuntimeError('Resolve did not activate the program reference timeline')
   for session in plan['sessions']:
    cursor=session['start']
    while cursor<session['end']:
@@ -191,6 +201,12 @@ def apply(plan_path):
     if cursor+n>session['end']:raise RuntimeError('Program reference exceeds recording boundary')
     append_verified(mp,reference,m,cursor,n,1);append_verified(mp,reference,m,cursor,n,2);cursor+=n
   reference.SetTrackName('audio',1,'Original program mix')
+ if plan.get('audio_embedded'):
+  # Resolve's track-enabled inspection follows the active timeline. Restore
+  # the owned edit after assembling the separate program reference.
+  if not p.SetCurrentTimeline(edit) or p.GetCurrentTimeline().GetUniqueId()!=edit.GetUniqueId():raise RuntimeError('Resolve did not activate the cut timeline for audio verification')
+  plan['audio_import_validation']=verify_primary_audio(edit,plan)
+  print('Verified selected primary audio on A1 before export',flush=True)
  plan['program_files']=pg
  layout=organize_project(p,plan)
  session=select_edit_session(r,p,plan)
